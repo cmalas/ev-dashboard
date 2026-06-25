@@ -1,0 +1,55 @@
+# ── Environment & Secrets ──────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Python ─────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+.venv/
+venv/
+env/
+pip-log.txt
+
+# ── Node / React ────────────────────────────────────────────────
+node_modules/
+frontend/node_modules/
+frontend/build/
+frontend/.cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+
+# ── Docker ─────────────────────────────────────────────────────
+# Keep docker-compose.yml but ignore any local override files
+docker-compose.override.yml
+docker-compose.local.yml
+
+# ── Database ────────────────────────────────────────────────────
+*.sql.bak
+postgres_data/
+
+# ── OS & Editor Junk ────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── Logs ────────────────────────────────────────────────────────
+*.log
+logs/
+autostart
+indirect
+name

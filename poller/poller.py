@@ -19,6 +19,7 @@ import os
 import time
 import json
 import logging
+import statistics
 from datetime import datetime, timezone
 
 import requests
@@ -61,11 +62,6 @@ TARGET_BOOKS      = [
 ]
 
 # ALL books we request in one shot (sharp + target).
-# Per the API docs, every group of 10 bookmakers = 1 region credit.
-# 11 books here = ceil(11/10) = 2 region-equivalents.
-# Cost per sport = 3 markets x 2 region-equivalents = 6 credits.
-# To stay at 3 credits/sport, keep total bookmakers <= 10.
-# We prioritise: 3 sharp + 7 soft = 10 books exactly = 1 region-equivalent.
 ALL_BOOKS = SHARP_BOOKS + TARGET_BOOKS[:7]   # 10 books = 1 region credit
 BOOKMAKERS_PARAM  = ",".join(ALL_BOOKS)
 
@@ -83,6 +79,12 @@ SPORTS = [
 
 # Minimum EV% to store as a result (filters noise)
 MIN_EV_PERCENT = 1.0
+
+# Sanity check: if the sharp book's implied probability differs from the
+# median of all soft books by more than this amount, the sharp line is
+# likely stale or erroneous — skip the market entirely.
+# 0.15 = 15 percentage points, e.g. sharp says 48% but consensus is 33%.
+MAX_SHARP_CONSENSUS_DIFF = 0.15
 
 
 # --- Database ----------------------------------------------------------------
@@ -115,7 +117,7 @@ def check_events_free(sport_key: str) -> int:
         return len(resp.json())
     except Exception as e:
         log.warning(f"  [{sport_key}] Events check failed: {e}")
-        return 0   # assume no events; skip to be safe
+        return 0
 
 
 def fetch_odds(sport_key: str) -> list[dict]:
@@ -124,8 +126,6 @@ def fetch_odds(sport_key: str) -> list[dict]:
 
     Credit cost: [number of markets] x ceil([number of bookmakers] / 10)
     With MARKETS=h2h,spreads,totals and 10 bookmakers -> 3 x 1 = 3 credits.
-    We use the `bookmakers` param instead of `regions` so we control the
-    exact books returned and never pay for books we don't use.
     """
     url = f"{ODDS_API_BASE}/sports/{sport_key}/odds"
     params = {
@@ -190,7 +190,7 @@ def compute_ev_percent(true_win_prob: float, book_american: int) -> float:
 
     true_loss_prob = 1 - true_win_prob
     ev = (true_win_prob * profit_if_win) - (true_loss_prob * 1.0)
-    return round(ev * 100, 3)  # as percent
+    return round(ev * 100, 3)
 
 
 def true_prob_to_american(true_prob: float) -> float:
@@ -218,10 +218,59 @@ def points_match(sharp_point, book_point, market_type: str) -> bool:
     if market_type == "h2h":
         return True
     if sharp_point is None or book_point is None:
-        # If either side is missing a point value, skip to be safe
         return False
-    # Use float comparison with a small tolerance for floating point drift
     return abs(float(sharp_point) - float(book_point)) < 0.01
+
+
+def sharp_line_is_sane(
+    sharp_prob: float,
+    outcome_name: str,
+    market_type: str,
+    bookmakers: list[dict],
+    sharp_point,
+) -> bool:
+    """
+    Sanity-check the sharp book's implied probability against the median
+    of all soft books for the same outcome and point.
+
+    If Pinnacle's line has moved significantly but soft books haven't updated,
+    the sharp prob will be a large outlier — producing false high-EV results.
+    We skip the market if the discrepancy exceeds MAX_SHARP_CONSENSUS_DIFF.
+
+    Returns True if the sharp line looks trustworthy, False if it's an outlier.
+    """
+    soft_probs = []
+    for bk in bookmakers:
+        if bk["key"] not in TARGET_BOOKS:
+            continue
+        book_odds = extract_book_odds([bk], bk["key"], market_type)
+        if outcome_name not in book_odds:
+            continue
+        bp = book_odds[outcome_name]
+        if not points_match(sharp_point, bp.get("point"), market_type):
+            continue
+        try:
+            implied = decimal_to_implied_prob(american_to_decimal(bp["price"]))
+            soft_probs.append(implied)
+        except (ZeroDivisionError, ValueError):
+            continue
+
+    if len(soft_probs) < 2:
+        # Not enough consensus data — trust the sharp book
+        return True
+
+    median_soft = statistics.median(soft_probs)
+    diff = abs(sharp_prob - median_soft)
+
+    if diff > MAX_SHARP_CONSENSUS_DIFF:
+        log.warning(
+            f"    Sharp line outlier detected for {outcome_name} ({market_type}): "
+            f"sharp_prob={sharp_prob:.3f}, median_soft={median_soft:.3f}, "
+            f"diff={diff:.3f} > threshold={MAX_SHARP_CONSENSUS_DIFF} -- skipping"
+        )
+        return False
+
+    return True
 
 
 # --- Core Processing ---------------------------------------------------------
@@ -253,7 +302,7 @@ def store_odds_snapshot(cur, game_id: int, bookmaker: dict):
     bk_title = bookmaker["title"]
 
     for market in bookmaker.get("markets", []):
-        market_type = market["key"]  # h2h | spreads | totals
+        market_type = market["key"]
         for outcome in market.get("outcomes", []):
             cur.execute("""
                 INSERT INTO odds_snapshots
@@ -303,12 +352,11 @@ def find_sharp_odds(bookmakers: list[dict], market_type: str) -> tuple[str | Non
 def compute_ev_for_event(cur, game_id: int, event: dict):
     """
     For each market in this event, find +EV opportunities across all target books.
-    Stores results to ev_results table.
 
-    Point-matching: for spreads and totals we verify the soft book is offering
-    the same point value as the sharp book. Without this, a book posting
-    "Cubs +1.5" gets compared to Pinnacle's "Cubs -1.5" true prob, producing
-    massive fake edges (the infamous MLB run-line false positives).
+    Two data quality guards:
+    1. Point-matching: for spreads/totals, only compare same point values.
+    2. Consensus check: if the sharp prob is a large outlier vs soft book
+       median, the sharp line is likely stale — skip it.
     """
     bookmakers = event.get("bookmakers", [])
 
@@ -316,11 +364,9 @@ def compute_ev_for_event(cur, game_id: int, event: dict):
         sharp_book, sharp_odds = find_sharp_odds(bookmakers, market_type)
 
         if not sharp_odds or len(sharp_odds) < 2:
-            continue  # need both sides to devigify
+            continue
 
         outcomes = list(sharp_odds.keys())
-
-        # We only handle standard 2-outcome markets here (h2h, spread, total)
         if len(outcomes) != 2:
             continue
 
@@ -333,6 +379,12 @@ def compute_ev_for_event(cur, game_id: int, event: dict):
         true_a, true_b = devigify(raw_a, raw_b)
 
         true_probs = {side_a: true_a, side_b: true_b}
+
+        # Sanity-check the sharp line against soft book consensus
+        # Do this once per market (check side_a; side_b is implied)
+        sharp_point_a = sharp_odds[side_a].get("point")
+        if not sharp_line_is_sane(raw_a, side_a, market_type, bookmakers, sharp_point_a):
+            continue
 
         # Check each target book for +EV vs the sharp line
         for bk in bookmakers:
@@ -351,14 +403,8 @@ def compute_ev_for_event(cur, game_id: int, event: dict):
                 book_point = book_market_odds[outcome_name].get("point")
                 sharp_point = sharp_odds[outcome_name].get("point")
 
-                # KEY FIX: skip if the point values don't match for
-                # spreads/totals. Mismatched points mean opposite sides
-                # of the line (e.g. -1.5 vs +1.5) — not a real edge.
+                # Skip mismatched spread/total points (e.g. -1.5 vs +1.5)
                 if not points_match(sharp_point, book_point, market_type):
-                    log.debug(
-                        f"    Skipping {outcome_name} ({market_type}): "
-                        f"point mismatch sharp={sharp_point} book={book_point} [{bk['key']}]"
-                    )
                     continue
 
                 ev = compute_ev_percent(true_prob, book_price)
@@ -407,7 +453,6 @@ def poll_once(rds):
 
     try:
         for sport_key in SPORTS:
-            # Step 1: FREE events check -- skip off-season sports
             event_count = check_events_free(sport_key)
             if event_count == 0:
                 log.info(f"  [{sport_key}] No upcoming events -- skipping (0 credits spent)")
@@ -416,7 +461,6 @@ def poll_once(rds):
 
             log.info(f"  [{sport_key}] {event_count} upcoming events -- fetching odds...")
 
-            # Step 2: Fetch odds (costs credits)
             try:
                 events = fetch_odds(sport_key)
             except requests.HTTPError as e:
@@ -445,18 +489,16 @@ def poll_once(rds):
         db.rollback()
         raise
     finally:
-        # Always close the connection, even if something above threw
         cur.close()
         db.close()
 
-    credits_used_this_cycle = sports_polled * 3  # 3 markets x 1 region-equiv
+    credits_used_this_cycle = sports_polled * 3
     log.info(
         f"-- Poll complete: {sports_polled} sports polled, {sports_skipped} skipped, "
         f"{total_events} events processed. "
         f"Est. credits this cycle: ~{credits_used_this_cycle} --\n"
     )
 
-    # Cache a summary in Redis for the backend to read instantly
     summary = {
         "last_poll":           datetime.now(timezone.utc).isoformat(),
         "sports_polled":       sports_polled,
@@ -474,7 +516,6 @@ def main():
     rds = get_redis()
 
     while True:
-        # Check pause flag before each cycle
         if rds.get(POLLER_PAUSE_KEY) == "1":
             log.info("Poller is paused -- sleeping 30s before re-checking...")
             time.sleep(30)

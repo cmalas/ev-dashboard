@@ -21,7 +21,7 @@ app = FastAPI(title="EV Dashboard API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -30,6 +30,9 @@ PG_DB   = os.getenv("POSTGRES_DB", "evdashboard")
 PG_USER = os.getenv("POSTGRES_USER", "evuser")
 PG_PASS = os.environ["POSTGRES_PASSWORD"]
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+
+# Redis key used to signal the poller to pause/resume
+POLLER_PAUSE_KEY = "poller:paused"
 
 SPORT_LABELS = {
     "americanfootball_nfl":   "NFL",
@@ -75,7 +78,7 @@ def fmt_american(price) -> str:
     """
     Format American odds with explicit + sign for positives.
     Uses round(float()) rather than int() to avoid silently truncating
-    Decimal values that come out of Postgres NUMERIC columns (e.g. 143.5 → 144
+    Decimal values that come out of Postgres NUMERIC columns (e.g. 143.5 -> 144
     rather than 143).
     """
     if price is None:
@@ -84,7 +87,7 @@ def fmt_american(price) -> str:
     return f"+{p}" if p > 0 else str(p)
 
 
-# ─── Endpoints ───────────────────────────────────────────────────────────────
+# --- Endpoints ---------------------------------------------------------------
 
 @app.get("/api/health")
 def health():
@@ -93,12 +96,31 @@ def health():
 
 @app.get("/api/status")
 def status():
-    """Returns last poll summary from Redis."""
+    """Returns last poll summary and current poller pause state from Redis."""
     rds = get_redis()
     raw = rds.get("poll:last_summary")
+    paused = rds.get(POLLER_PAUSE_KEY) == "1"
     if not raw:
-        return {"last_poll": None, "message": "No poll completed yet"}
-    return json.loads(raw)
+        return {"last_poll": None, "message": "No poll completed yet", "paused": paused}
+    data = json.loads(raw)
+    data["paused"] = paused
+    return data
+
+
+@app.post("/api/poller/pause")
+def pause_poller():
+    """Signal the poller to pause after its current cycle completes."""
+    rds = get_redis()
+    rds.set(POLLER_PAUSE_KEY, "1")
+    return {"paused": True}
+
+
+@app.post("/api/poller/resume")
+def resume_poller():
+    """Signal the poller to resume normal polling."""
+    rds = get_redis()
+    rds.delete(POLLER_PAUSE_KEY)
+    return {"paused": False}
 
 
 @app.get("/api/ev")

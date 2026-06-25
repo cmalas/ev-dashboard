@@ -5,10 +5,10 @@ Fetches odds from The Odds API, stores snapshots, and computes +EV opportunities
 Runs on a configurable interval. Designed for mainlines now; props-ready structure.
 
 Credit cost per poll cycle (The Odds API v4):
-  cost = markets × ceil(bookmakers / 10)  per sport that has active events
+  cost = markets x ceil(bookmakers / 10)  per sport that has active events
   With 3 markets and 10 bookmakers = 3 credits per active sport.
   5 sports all active = 15 credits/poll.
-  At 20K credits/month → ~1,333 polls/month → one poll every ~32 minutes.
+  At 20K credits/month -> ~1,333 polls/month -> one poll every ~32 minutes.
   Set POLL_INTERVAL_SECONDS=1800 (30 min) for a safe buffer on the 20K plan.
 
 Key optimisation: The /events endpoint is FREE (no credit cost).
@@ -33,7 +33,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ─── Config ──────────────────────────────────────────────────────────────────
+# --- Config ------------------------------------------------------------------
 
 ODDS_API_KEY      = os.environ["ODDS_API_KEY"]
 ODDS_API_BASE     = "https://api.the-odds-api.com/v4"
@@ -45,6 +45,9 @@ PG_USER           = os.getenv("POSTGRES_USER", "evuser")
 PG_PASS           = os.environ["POSTGRES_PASSWORD"]
 
 REDIS_HOST        = os.getenv("REDIS_HOST", "redis")
+
+# Redis key written by the backend to pause/resume this poller
+POLLER_PAUSE_KEY  = "poller:paused"
 
 # The sharpest books to use as "true line" sources, in priority order.
 # Pinnacle is the gold standard. We fall back to Circa/BetOnline if Pinnacle
@@ -60,8 +63,8 @@ TARGET_BOOKS      = [
 # ALL books we request in one shot (sharp + target).
 # Per the API docs, every group of 10 bookmakers = 1 region credit.
 # 11 books here = ceil(11/10) = 2 region-equivalents.
-# Cost per sport = 3 markets × 2 region-equivalents = 6 credits.
-# To stay at 3 credits/sport, keep total bookmakers ≤ 10.
+# Cost per sport = 3 markets x 2 region-equivalents = 6 credits.
+# To stay at 3 credits/sport, keep total bookmakers <= 10.
 # We prioritise: 3 sharp + 7 soft = 10 books exactly = 1 region-equivalent.
 ALL_BOOKS = SHARP_BOOKS + TARGET_BOOKS[:7]   # 10 books = 1 region credit
 BOOKMAKERS_PARAM  = ",".join(ALL_BOOKS)
@@ -82,7 +85,7 @@ SPORTS = [
 MIN_EV_PERCENT = 1.0
 
 
-# ─── Database ────────────────────────────────────────────────────────────────
+# --- Database ----------------------------------------------------------------
 
 def get_db():
     return psycopg2.connect(
@@ -94,7 +97,7 @@ def get_redis():
     return redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
 
 
-# ─── Odds API ────────────────────────────────────────────────────────────────
+# --- Odds API ----------------------------------------------------------------
 
 def check_events_free(sport_key: str) -> int:
     """
@@ -119,8 +122,8 @@ def fetch_odds(sport_key: str) -> list[dict]:
     """
     Fetch live odds for a sport. Returns raw API events list.
 
-    Credit cost: [number of markets] × ceil([number of bookmakers] / 10)
-    With MARKETS=h2h,spreads,totals and 10 bookmakers → 3 × 1 = 3 credits.
+    Credit cost: [number of markets] x ceil([number of bookmakers] / 10)
+    With MARKETS=h2h,spreads,totals and 10 bookmakers -> 3 x 1 = 3 credits.
     We use the `bookmakers` param instead of `regions` so we control the
     exact books returned and never pay for books we don't use.
     """
@@ -136,22 +139,22 @@ def fetch_odds(sport_key: str) -> list[dict]:
     remaining = resp.headers.get("x-requests-remaining", "?")
     used       = resp.headers.get("x-requests-used", "?")
     cost       = resp.headers.get("x-requests-last", "?")
-    log.info(f"  [{sport_key}] credits — cost: {cost}, used: {used}, remaining: {remaining}")
+    log.info(f"  [{sport_key}] credits -- cost: {cost}, used: {used}, remaining: {remaining}")
 
     if resp.status_code == 401:
-        log.error("Invalid API key — check ODDS_API_KEY in .env")
+        log.error("Invalid API key -- check ODDS_API_KEY in .env")
         return []
     if resp.status_code == 422:
         log.warning(f"  [{sport_key}] No events (off-season)")
         return []
     if resp.status_code == 429:
-        log.warning(f"  [{sport_key}] Rate limited — will retry next cycle")
+        log.warning(f"  [{sport_key}] Rate limited -- will retry next cycle")
         return []
     resp.raise_for_status()
     return resp.json()
 
 
-# ─── EV Math ─────────────────────────────────────────────────────────────────
+# --- EV Math -----------------------------------------------------------------
 
 def american_to_decimal(american: int) -> float:
     """Convert American odds to decimal multiplier (includes stake)."""
@@ -177,7 +180,7 @@ def devigify(prob_a: float, prob_b: float) -> tuple[float, float]:
 
 def compute_ev_percent(true_win_prob: float, book_american: int) -> float:
     """
-    EV% = (true_win_prob × profit_if_win) - (true_loss_prob × 1)
+    EV% = (true_win_prob x profit_if_win) - (true_loss_prob x 1)
     Normalized as a percentage of the stake.
     """
     if book_american > 0:
@@ -193,10 +196,8 @@ def compute_ev_percent(true_win_prob: float, book_american: int) -> float:
 def true_prob_to_american(true_prob: float) -> float:
     """
     Convert a true win probability to no-vig American odds.
-    Guards against edge-case probabilities of exactly 0 or 1,
-    which would cause division by zero.
+    Clamps to avoid division by zero on degenerate lines.
     """
-    # Clamp to avoid division by zero on degenerate lines
     true_prob = max(0.0001, min(0.9999, true_prob))
     if true_prob >= 0.5:
         return -(true_prob / (1 - true_prob)) * 100
@@ -204,7 +205,7 @@ def true_prob_to_american(true_prob: float) -> float:
         return ((1 - true_prob) / true_prob) * 100
 
 
-# ─── Core Processing ─────────────────────────────────────────────────────────
+# --- Core Processing ---------------------------------------------------------
 
 def upsert_game(cur, event: dict, sport_key: str) -> int:
     """Insert or update a game row. Returns the internal game id."""
@@ -314,7 +315,7 @@ def compute_ev_for_event(cur, game_id: int, event: dict):
             if bk["key"] not in TARGET_BOOKS:
                 continue
 
-            book_market_odds = extract_book_odds([bk], market_type)
+            book_market_odds = extract_book_odds([bk], bk["key"], market_type)
             if not book_market_odds:
                 continue
 
@@ -357,11 +358,11 @@ def compute_ev_for_event(cur, game_id: int, event: dict):
                 )
 
 
-# ─── Main Poll Loop ───────────────────────────────────────────────────────────
+# --- Main Poll Loop ----------------------------------------------------------
 
 def poll_once(rds):
     """Run one full poll cycle across all sports."""
-    log.info("── Starting poll cycle ──")
+    log.info("-- Starting poll cycle --")
     db  = get_db()
     cur = db.cursor()
 
@@ -371,16 +372,16 @@ def poll_once(rds):
 
     try:
         for sport_key in SPORTS:
-            # ── Step 1: FREE events check — skip off-season sports ──────────
+            # Step 1: FREE events check -- skip off-season sports
             event_count = check_events_free(sport_key)
             if event_count == 0:
-                log.info(f"  [{sport_key}] No upcoming events — skipping (0 credits spent)")
+                log.info(f"  [{sport_key}] No upcoming events -- skipping (0 credits spent)")
                 sports_skipped += 1
                 continue
 
-            log.info(f"  [{sport_key}] {event_count} upcoming events — fetching odds...")
+            log.info(f"  [{sport_key}] {event_count} upcoming events -- fetching odds...")
 
-            # ── Step 2: Fetch odds (costs credits) ──────────────────────────
+            # Step 2: Fetch odds (costs credits)
             try:
                 events = fetch_odds(sport_key)
             except requests.HTTPError as e:
@@ -413,11 +414,11 @@ def poll_once(rds):
         cur.close()
         db.close()
 
-    credits_used_this_cycle = sports_polled * 3  # 3 markets × 1 region-equiv
+    credits_used_this_cycle = sports_polled * 3  # 3 markets x 1 region-equiv
     log.info(
-        f"── Poll complete: {sports_polled} sports polled, {sports_skipped} skipped, "
+        f"-- Poll complete: {sports_polled} sports polled, {sports_skipped} skipped, "
         f"{total_events} events processed. "
-        f"Est. credits this cycle: ~{credits_used_this_cycle} ──\n"
+        f"Est. credits this cycle: ~{credits_used_this_cycle} --\n"
     )
 
     # Cache a summary in Redis for the backend to read instantly
@@ -438,6 +439,12 @@ def main():
     rds = get_redis()
 
     while True:
+        # Check pause flag before each cycle
+        if rds.get(POLLER_PAUSE_KEY) == "1":
+            log.info("Poller is paused -- sleeping 30s before re-checking...")
+            time.sleep(30)
+            continue
+
         try:
             poll_once(rds)
         except Exception as e:

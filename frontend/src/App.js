@@ -14,11 +14,10 @@ function App() {
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState(null);
   const [lastRefresh, setLastRefresh] = useState(null);
-  const [pollerPaused, setPollerPaused] = useState(false);
-  const [pollerToggling, setPollerToggling] = useState(false);
-  const [activeTab, setActiveTab] = useState('mainlines'); // 'mainlines' | 'props'
-  const [propsStatus, setPropsStatus] = useState(null);
-  const [propsPollLoading, setPropsPollLoading] = useState(false);
+
+  // Poller pause/resume state
+  const [pollerPaused,    setPollerPaused]    = useState(false);
+  const [pollerToggling,  setPollerToggling]  = useState(false);
 
   // Filter state
   const [filters, setFilters] = useState({
@@ -32,27 +31,14 @@ function App() {
   const fetchStatus = useCallback(async () => {
     try {
       const r = await fetch(`${API}/status`);
-      setStatus(await r.json());
+      const data = await r.json();
+      setStatus(data);
+      // Keep pollerPaused in sync with what the backend reports
+      if (data.paused !== undefined) {
+        setPollerPaused(data.paused);
+      }
     } catch (_) {}
   }, []);
-
-  const fetchPollerState = useCallback(async () => {
-    try {
-      const r = await fetch(`${API}/poller/state`);
-      const d = await r.json();
-      setPollerPaused(d.paused);
-    } catch (_) {}
-  }, []);
-
-  const togglePoller = useCallback(async () => {
-    setPollerToggling(true);
-    try {
-      const action = pollerPaused ? 'resume' : 'pause';
-      await fetch(`${API}/poller/${action}`, { method: 'POST' });
-      setPollerPaused(!pollerPaused);
-    } catch (_) {}
-    setPollerToggling(false);
-  }, [pollerPaused]);
 
   const fetchMeta = useCallback(async () => {
     try {
@@ -77,7 +63,6 @@ function App() {
       if (filters.book)   params.set('book', filters.book);
       params.set('min_ev', filters.minEv);
       params.set('hours_ahead', filters.hoursAhead);
-      params.set('tab', activeTab);
 
       const r = await fetch(`${API}/ev?${params}`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -89,44 +74,30 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [filters, activeTab]);
+  }, [filters]);
 
-  const fetchPropsStatus = useCallback(async () => {
+  const handleTogglePoller = useCallback(async () => {
+    setPollerToggling(true);
     try {
-      const r = await fetch(`${API}/props/status`);
-      setPropsStatus(await r.json());
-    } catch (_) {}
-  }, []);
-
-  const triggerPropsPoll = useCallback(async () => {
-    setPropsPollLoading(true);
-    try {
-      await fetch(`${API}/props/poll`, { method: 'POST' });
-      // Poll for status updates every 3s until done
-      const interval = setInterval(async () => {
-        const r = await fetch(`${API}/props/status`);
-        const s = await r.json();
-        setPropsStatus(s);
-        if (s.status === 'done' || s.status === 'error') {
-          clearInterval(interval);
-          setPropsPollLoading(false);
-          if (s.status === 'done') fetchEV(); // refresh table
-        }
-      }, 3000);
-    } catch (_) {
-      setPropsPollLoading(false);
+      const endpoint = pollerPaused ? 'resume' : 'pause';
+      const r = await fetch(`${API}/poller/${endpoint}`, { method: 'POST' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      setPollerPaused(data.paused);
+    } catch (e) {
+      console.error('Failed to toggle poller:', e);
+    } finally {
+      setPollerToggling(false);
     }
-  }, [fetchEV]);
+  }, [pollerPaused]);
 
   // Initial load
   useEffect(() => {
     fetchMeta();
     fetchStatus();
-    fetchPollerState();
-    fetchPropsStatus();
-  }, [fetchMeta, fetchStatus, fetchPollerState, fetchPropsStatus]);
+  }, [fetchMeta, fetchStatus]);
 
-  // Refetch EV when filters or tab changes
+  // Refetch EV when filters change
   useEffect(() => {
     fetchEV();
   }, [fetchEV]);
@@ -136,10 +107,9 @@ function App() {
     const id = setInterval(() => {
       fetchEV();
       fetchStatus();
-      fetchPropsStatus();
     }, 120_000);
     return () => clearInterval(id);
-  }, [fetchEV, fetchStatus, fetchPropsStatus]);
+  }, [fetchEV, fetchStatus]);
 
   return (
     <div className="app">
@@ -157,7 +127,7 @@ function App() {
             lastRefresh={lastRefresh}
             onRefresh={() => { fetchEV(); fetchStatus(); }}
             pollerPaused={pollerPaused}
-            onTogglePoller={togglePoller}
+            onTogglePoller={handleTogglePoller}
             pollerToggling={pollerToggling}
           />
         </div>
@@ -172,22 +142,6 @@ function App() {
         />
 
         <section className="results-section">
-          {/* Tab toggle */}
-          <div className="tab-bar">
-            <button
-              className={`tab-btn ${activeTab === 'mainlines' ? 'active' : ''}`}
-              onClick={() => setActiveTab('mainlines')}
-            >
-              Main Lines
-            </button>
-            <button
-              className={`tab-btn ${activeTab === 'props' ? 'active' : ''}`}
-              onClick={() => setActiveTab('props')}
-            >
-              Player Props <span className="tab-badge">MLB</span>
-            </button>
-          </div>
-
           <div className="results-header">
             <div className="results-count">
               {loading ? (
@@ -200,51 +154,20 @@ function App() {
                 </span>
               )}
             </div>
-
-            {activeTab === 'props' && (
-              <div className="props-poll-controls">
-                {propsStatus?.status === 'done' && (
-                  <span className="props-poll-meta">
-                    Last poll: {propsStatus.games_polled} games · {propsStatus.props_found} edges · ~{propsStatus.est_credits} credits
-                  </span>
-                )}
-                {(propsStatus?.status === 'running' || propsStatus?.status === 'queued') && (
-                  <span className="loading-pulse">Polling props…</span>
-                )}
-                <button
-                  className="poll-props-btn"
-                  onClick={triggerPropsPoll}
-                  disabled={propsPollLoading || propsStatus?.status === 'running' || propsStatus?.status === 'queued'}
-                >
-                  {propsPollLoading || propsStatus?.status === 'running' || propsStatus?.status === 'queued'
-                    ? '⏳ Polling…'
-                    : '⚡ Poll Props Now'}
-                </button>
-              </div>
-            )}
+            <div className="props-badge">Props coming soon</div>
           </div>
 
           {!loading && !error && evData.length === 0 && (
             <div className="empty-state">
-              <div className="empty-icon">{activeTab === 'props' ? '⚾' : '📊'}</div>
-              {activeTab === 'props' ? (
-                <>
-                  <h3>No prop edges found</h3>
-                  <p>Hit "Poll Props Now" to fetch today's MLB player prop odds.<br />
-                  Props are only polled on demand to conserve API credits.</p>
-                </>
-              ) : (
-                <>
-                  <h3>No edges found</h3>
-                  <p>Try lowering the minimum EV% or expanding the time window.<br />
-                  Lines may not have been polled yet — check the status bar above.</p>
-                </>
-              )}
+              <div className="empty-icon">📊</div>
+              <h3>No edges found</h3>
+              <p>Try lowering the minimum EV% or expanding the time window.<br />
+              Lines may not have been polled yet — check the status bar above.</p>
             </div>
           )}
 
           {!error && evData.length > 0 && (
-            <EVTable rows={evData} loading={loading} isProps={activeTab === 'props'} />
+            <EVTable rows={evData} loading={loading} />
           )}
         </section>
       </main>

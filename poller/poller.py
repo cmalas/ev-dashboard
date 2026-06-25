@@ -130,7 +130,7 @@ def fetch_odds(sport_key: str) -> list[dict]:
     url = f"{ODDS_API_BASE}/sports/{sport_key}/odds"
     params = {
         "apiKey":     ODDS_API_KEY,
-        "bookmakers": BOOKMAKERS_PARAM,   # 10 books = 1 region-equivalent
+        "bookmakers": BOOKMAKERS_PARAM,
         "markets":    MARKETS,
         "oddsFormat": "american",
     }
@@ -203,6 +203,25 @@ def true_prob_to_american(true_prob: float) -> float:
         return -(true_prob / (1 - true_prob)) * 100
     else:
         return ((1 - true_prob) / true_prob) * 100
+
+
+def points_match(sharp_point, book_point, market_type: str) -> bool:
+    """
+    For spreads and totals, verify the soft book is offering the same
+    point value as the sharp book before comparing prices.
+
+    Without this check, a book offering "Cubs +1.5" gets compared against
+    Pinnacle's "Cubs -1.5" true probability — producing massive fake edges.
+
+    For h2h there are no points, so we always return True.
+    """
+    if market_type == "h2h":
+        return True
+    if sharp_point is None or book_point is None:
+        # If either side is missing a point value, skip to be safe
+        return False
+    # Use float comparison with a small tolerance for floating point drift
+    return abs(float(sharp_point) - float(book_point)) < 0.01
 
 
 # --- Core Processing ---------------------------------------------------------
@@ -285,6 +304,11 @@ def compute_ev_for_event(cur, game_id: int, event: dict):
     """
     For each market in this event, find +EV opportunities across all target books.
     Stores results to ev_results table.
+
+    Point-matching: for spreads and totals we verify the soft book is offering
+    the same point value as the sharp book. Without this, a book posting
+    "Cubs +1.5" gets compared to Pinnacle's "Cubs -1.5" true prob, producing
+    massive fake edges (the infamous MLB run-line false positives).
     """
     bookmakers = event.get("bookmakers", [])
 
@@ -325,6 +349,17 @@ def compute_ev_for_event(cur, game_id: int, event: dict):
 
                 book_price = book_market_odds[outcome_name]["price"]
                 book_point = book_market_odds[outcome_name].get("point")
+                sharp_point = sharp_odds[outcome_name].get("point")
+
+                # KEY FIX: skip if the point values don't match for
+                # spreads/totals. Mismatched points mean opposite sides
+                # of the line (e.g. -1.5 vs +1.5) — not a real edge.
+                if not points_match(sharp_point, book_point, market_type):
+                    log.debug(
+                        f"    Skipping {outcome_name} ({market_type}): "
+                        f"point mismatch sharp={sharp_point} book={book_point} [{bk['key']}]"
+                    )
+                    continue
 
                 ev = compute_ev_percent(true_prob, book_price)
 

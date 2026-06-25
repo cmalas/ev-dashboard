@@ -21,7 +21,7 @@ app = FastAPI(title="EV Dashboard API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET"],
     allow_headers=["*"],
 )
 
@@ -50,10 +50,10 @@ BOOK_LABELS = {
     "fanduel":     "FanDuel",
     "betmgm":      "BetMGM",
     "caesars":     "Caesars",
-    "espnbet":     "theScore",
+    "espnbet":     "ESPN Bet",
     "bet365":      "Bet365",
     "fanatics":    "Fanatics",
-    # Sharp reference books (not shown as targets, but kept for label display)
+    "betrivers":   "BetRivers",
     "pinnacle":    "Pinnacle",
     "circa":       "Circa",
     "betonline_ag":"BetOnline",
@@ -72,10 +72,15 @@ def get_redis():
 
 
 def fmt_american(price) -> str:
-    """Format American odds with explicit + sign for positives."""
-    p = int(price) if price is not None else None
-    if p is None:
+    """
+    Format American odds with explicit + sign for positives.
+    Uses round(float()) rather than int() to avoid silently truncating
+    Decimal values that come out of Postgres NUMERIC columns (e.g. 143.5 → 144
+    rather than 143).
+    """
+    if price is None:
         return "N/A"
+    p = round(float(price))
     return f"+{p}" if p > 0 else str(p)
 
 
@@ -84,73 +89,6 @@ def fmt_american(price) -> str:
 @app.get("/api/health")
 def health():
     return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
-
-
-@app.get("/api/poller/state")
-def poller_state():
-    """Returns whether the poller is currently paused."""
-    rds = get_redis()
-    paused = rds.get("poller:paused") == "1"
-    return {"paused": paused}
-
-
-@app.post("/api/poller/pause")
-def poller_pause():
-    """Pause the poller — it will skip poll cycles until resumed."""
-    rds = get_redis()
-    rds.set("poller:paused", "1")
-    return {"paused": True, "message": "Poller paused. No credits will be consumed."}
-
-
-@app.post("/api/poller/resume")
-def poller_resume():
-    """Resume the poller."""
-    rds = get_redis()
-    rds.delete("poller:paused")
-    return {"paused": False, "message": "Poller resumed. Next cycle starts at the next interval."}
-
-
-# ─── Props Endpoints ──────────────────────────────────────────────────────────
-
-MLB_PROP_MARKETS = [
-    "batter_hits", "batter_home_runs", "batter_total_bases",
-    "batter_rbis", "pitcher_strikeouts",
-]
-
-PROP_MARKET_LABELS = {
-    "batter_hits":         "Hits",
-    "batter_home_runs":    "Home Runs",
-    "batter_total_bases":  "Total Bases",
-    "batter_rbis":         "RBIs",
-    "pitcher_strikeouts":  "Strikeouts",
-}
-
-@app.post("/api/props/poll")
-def request_props_poll():
-    """Signal the poller to run a MLB props poll on its next wake cycle (within ~10s)."""
-    rds = get_redis()
-    # Don't queue if one is already running
-    status_raw = rds.get("props:poll_status")
-    if status_raw:
-        status = json.loads(status_raw)
-        if status.get("status") == "running":
-            return {"queued": False, "message": "Props poll already in progress"}
-    rds.set("props:poll_requested", "1", ex=120)
-    rds.set("props:poll_status", json.dumps({
-        "status": "queued",
-        "queued_at": datetime.now(timezone.utc).isoformat(),
-    }), ex=120)
-    return {"queued": True, "message": "Props poll queued — will start within ~10 seconds"}
-
-
-@app.get("/api/props/status")
-def props_poll_status():
-    """Returns the status of the last (or current) props poll."""
-    rds = get_redis()
-    raw = rds.get("props:poll_status")
-    if not raw:
-        return {"status": "idle", "message": "No props poll has been run yet"}
-    return json.loads(raw)
 
 
 @app.get("/api/status")
@@ -170,7 +108,6 @@ def get_ev_opportunities(
     book: Optional[str]   = Query(None, description="Filter by bookmaker key, e.g. 'draftkings'"),
     min_ev: float         = Query(1.0,  description="Minimum EV% to return"),
     hours_ahead: int      = Query(48,   description="Only show games starting within this many hours"),
-    tab: str              = Query("mainlines", description="'mainlines' or 'props'"),
 ):
     """
     Returns all current +EV opportunities, joining with game info.
@@ -201,7 +138,7 @@ def get_ev_opportunities(
         WHERE
             ev.ev_percent >= %s
             AND g.commence_time > NOW()
-            AND g.commence_time < NOW() + (%s || ' hours')::INTERVAL
+            AND g.commence_time < NOW() + make_interval(hours => %s)
             AND g.completed = FALSE
             -- Only keep the most recent EV result per (game, market, outcome, book)
             AND ev.computed_at = (
@@ -214,14 +151,6 @@ def get_ev_opportunities(
             )
     """
     params = [min_ev, hours_ahead]
-
-    # Filter to mainlines vs props based on tab
-    if tab == "props":
-        query += " AND ev.market_type = ANY(%s)"
-        params.append(MLB_PROP_MARKETS)
-    else:
-        # mainlines: exclude any prop market types
-        query += " AND ev.market_type NOT IN ('batter_hits','batter_home_runs','batter_total_bases','batter_rbis','pitcher_strikeouts')"
 
     if sport:
         query += " AND g.sport_key = %s"
@@ -252,7 +181,7 @@ def get_ev_opportunities(
                 "commence_time": r["commence_time"].isoformat() if r["commence_time"] else None,
             },
             "market_type":    r["market_type"],
-            "market_label":   PROP_MARKET_LABELS.get(r["market_type"]) or MARKET_LABELS.get(r["market_type"], r["market_type"]),
+            "market_label":   MARKET_LABELS.get(r["market_type"], r["market_type"]),
             "outcome_name":   r["outcome_name"],
             "point":          float(r["point"]) if r["point"] is not None else None,
             "book":           r["best_book"],

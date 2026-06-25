@@ -52,18 +52,18 @@ REDIS_HOST        = os.getenv("REDIS_HOST", "redis")
 SHARP_BOOKS       = ["pinnacle", "circa", "betonline_ag"]
 
 # Soft/recreational books we scan for value.
-# Missouri-available books only: BetRivers is excluded (not licensed in MO).
-# Circa and BetOnline are sharp-reference books only, not scanned as targets.
 TARGET_BOOKS      = [
     "draftkings", "fanduel", "betmgm", "caesars",
-    "espnbet", "fanatics", "bet365",
+    "espnbet", "fanatics", "betrivers", "bet365",
 ]
 
 # ALL books we request in one shot (sharp + target).
 # Per the API docs, every group of 10 bookmakers = 1 region credit.
-# 3 sharp + 7 soft = 10 books exactly = 1 region-equivalent.
-# Cost per sport = 3 markets × 1 region-equiv = 3 credits. No change from before.
-ALL_BOOKS = SHARP_BOOKS + TARGET_BOOKS        # exactly 10 books = 1 region credit
+# 11 books here = ceil(11/10) = 2 region-equivalents.
+# Cost per sport = 3 markets × 2 region-equivalents = 6 credits.
+# To stay at 3 credits/sport, keep total bookmakers ≤ 10.
+# We prioritise: 3 sharp + 7 soft = 10 books exactly = 1 region-equivalent.
+ALL_BOOKS = SHARP_BOOKS + TARGET_BOOKS[:7]   # 10 books = 1 region credit
 BOOKMAKERS_PARAM  = ",".join(ALL_BOOKS)
 
 # Markets to poll per sport (mainlines only; add props here later)
@@ -80,23 +80,6 @@ SPORTS = [
 
 # Minimum EV% to store as a result (filters noise)
 MIN_EV_PERCENT = 1.0
-
-# Maximum EV% to store — anything above this is almost certainly a data error
-# (stale line, game already started, mismatched point values, etc.)
-MAX_EV_PERCENT = 25.0
-
-# MLB player prop markets to fetch on manual poll.
-# These use the /events/{eventId}/odds endpoint (one call per game).
-# Cost per game = [number of prop markets] × 1 region = 5 credits/game.
-# With ~15 MLB games/day slate → ~75 credits per manual poll. Very manageable.
-MLB_PROP_MARKETS = [
-    "batter_hits",
-    "batter_home_runs",
-    "batter_total_bases",
-    "batter_rbis",
-    "pitcher_strikeouts",
-]
-MLB_PROP_MARKETS_PARAM = ",".join(MLB_PROP_MARKETS)
 
 
 # ─── Database ────────────────────────────────────────────────────────────────
@@ -168,40 +151,7 @@ def fetch_odds(sport_key: str) -> list[dict]:
     return resp.json()
 
 
-def fetch_props_for_game(event_id: str, sport_key: str) -> dict | None:
-    """
-    Fetch player prop odds for a single game using the event-odds endpoint.
-    Props MUST be fetched one game at a time — the bulk /odds endpoint doesn't
-    support them.
-
-    Credit cost: [number of prop markets] × 1 region = 5 credits per game.
-    Returns the raw API event dict, or None on error.
-    """
-    url = f"{ODDS_API_BASE}/sports/{sport_key}/events/{event_id}/odds"
-    params = {
-        "apiKey":     ODDS_API_KEY,
-        "regions":    "us",
-        "markets":    MLB_PROP_MARKETS_PARAM,
-        "oddsFormat": "american",
-    }
-    resp = requests.get(url, params=params, timeout=15)
-
-    remaining = resp.headers.get("x-requests-remaining", "?")
-    cost       = resp.headers.get("x-requests-last", "?")
-    log.info(f"    [props/{event_id[:8]}] credits — cost: {cost}, remaining: {remaining}")
-
-    if resp.status_code == 401:
-        log.error("Invalid API key — check ODDS_API_KEY in .env")
-        return None
-    if resp.status_code in (404, 422):
-        log.warning(f"    [props/{event_id[:8]}] No props available for this event")
-        return None
-    if resp.status_code == 429:
-        log.warning(f"    [props/{event_id[:8]}] Rate limited")
-        return None
-    resp.raise_for_status()
-    return resp.json()
-
+# ─── EV Math ─────────────────────────────────────────────────────────────────
 
 def american_to_decimal(american: int) -> float:
     """Convert American odds to decimal multiplier (includes stake)."""
@@ -238,6 +188,20 @@ def compute_ev_percent(true_win_prob: float, book_american: int) -> float:
     true_loss_prob = 1 - true_win_prob
     ev = (true_win_prob * profit_if_win) - (true_loss_prob * 1.0)
     return round(ev * 100, 3)  # as percent
+
+
+def true_prob_to_american(true_prob: float) -> float:
+    """
+    Convert a true win probability to no-vig American odds.
+    Guards against edge-case probabilities of exactly 0 or 1,
+    which would cause division by zero.
+    """
+    # Clamp to avoid division by zero on degenerate lines
+    true_prob = max(0.0001, min(0.9999, true_prob))
+    if true_prob >= 0.5:
+        return -(true_prob / (1 - true_prob)) * 100
+    else:
+        return ((1 - true_prob) / true_prob) * 100
 
 
 # ─── Core Processing ─────────────────────────────────────────────────────────
@@ -350,7 +314,7 @@ def compute_ev_for_event(cur, game_id: int, event: dict):
             if bk["key"] not in TARGET_BOOKS:
                 continue
 
-            book_market_odds = extract_book_odds([bk], bk["key"], market_type)
+            book_market_odds = extract_book_odds([bk], market_type)
             if not book_market_odds:
                 continue
 
@@ -360,28 +324,13 @@ def compute_ev_for_event(cur, game_id: int, event: dict):
 
                 book_price = book_market_odds[outcome_name]["price"]
                 book_point = book_market_odds[outcome_name].get("point")
-                sharp_point = sharp_odds[outcome_name].get("point")
-
-                # For spreads and totals, skip if the point value doesn't match
-                # the sharp book. Cast to float to avoid Decimal vs float mismatches.
-                # Also catches -1.5 vs +1.5 (same team, opposite side of the line).
-                if market_type in ("spreads", "totals"):
-                    try:
-                        if round(float(book_point), 1) != round(float(sharp_point), 1):
-                            continue
-                    except (TypeError, ValueError):
-                        continue  # if either point is None or unparseable, skip
 
                 ev = compute_ev_percent(true_prob, book_price)
 
-                if ev < MIN_EV_PERCENT or ev > MAX_EV_PERCENT:
+                if ev < MIN_EV_PERCENT:
                     continue
 
-                # Convert true_prob back to no-vig American odds for display
-                if true_prob >= 0.5:
-                    no_vig_american = -(true_prob / (1 - true_prob)) * 100
-                else:
-                    no_vig_american = ((1 - true_prob) / true_prob) * 100
+                no_vig_american = true_prob_to_american(true_prob)
 
                 cur.execute("""
                     INSERT INTO ev_results
@@ -408,284 +357,78 @@ def compute_ev_for_event(cur, game_id: int, event: dict):
                 )
 
 
-def compute_ev_for_props(cur, game_id: int, event: dict):
-    """
-    Compute +EV for player prop markets (batter/pitcher stats).
-
-    Props differ from mainlines in one key way: each market has many Over/Under
-    pairs, one per player. The player name lives in outcome["description"], not
-    outcome["name"]. So we key on (player, market, side) tuples.
-
-    EV method: for each player's Over/Under pair across sharp books, devigify
-    to get true probabilities, then check each soft book for +EV.
-    """
-    bookmakers = event.get("bookmakers", [])
-
-    for market_type in MLB_PROP_MARKETS:
-        # ── Build sharp book's player lines ──────────────────────────────────
-        sharp_book = None
-        sharp_player_lines = {}  # {player_name: {"Over": price, "Under": price}}
-
-        for bk_key in SHARP_BOOKS:
-            for bk in bookmakers:
-                if bk["key"] != bk_key:
-                    continue
-                for market in bk.get("markets", []):
-                    if market["key"] != market_type:
-                        continue
-                    for outcome in market.get("outcomes", []):
-                        player = outcome.get("description", "")
-                        side   = outcome["name"]   # "Over" or "Under"
-                        price  = int(outcome["price"])
-                        point  = outcome.get("point")
-                        if player not in sharp_player_lines:
-                            sharp_player_lines[player] = {}
-                        sharp_player_lines[player][side] = {"price": price, "point": point}
-                    if sharp_player_lines:
-                        sharp_book = bk_key
-                        break
-                if sharp_book:
-                    break
-            if sharp_book:
-                break
-
-        if not sharp_book or not sharp_player_lines:
-            continue
-
-        # ── Compute true probs for each player from sharp line ────────────────
-        true_probs = {}   # {player_name: {"Over": prob, "Under": prob}}
-        for player, sides in sharp_player_lines.items():
-            if "Over" not in sides or "Under" not in sides:
-                continue
-            dec_over  = american_to_decimal(sides["Over"]["price"])
-            dec_under = american_to_decimal(sides["Under"]["price"])
-            raw_over  = decimal_to_implied_prob(dec_over)
-            raw_under = decimal_to_implied_prob(dec_under)
-            true_over, true_under = devigify(raw_over, raw_under)
-            true_probs[player] = {"Over": true_over, "Under": true_under}
-
-        # ── Check each soft book for +EV ─────────────────────────────────────
-        for bk in bookmakers:
-            if bk["key"] not in TARGET_BOOKS:
-                continue
-
-            for market in bk.get("markets", []):
-                if market["key"] != market_type:
-                    continue
-
-                # Group outcomes by player
-                book_player_lines = {}
-                for outcome in market.get("outcomes", []):
-                    player = outcome.get("description", "")
-                    side   = outcome["name"]
-                    price  = int(outcome["price"])
-                    point  = outcome.get("point")
-                    if player not in book_player_lines:
-                        book_player_lines[player] = {}
-                    book_player_lines[player][side] = {"price": price, "point": point}
-
-                for player, sides in book_player_lines.items():
-                    if player not in true_probs:
-                        continue
-
-                    for side in ("Over", "Under"):
-                        if side not in sides:
-                            continue
-                        true_prob  = true_probs[player][side]
-                        book_price = sides[side]["price"]
-                        book_point = sides[side].get("point")
-
-                        ev = compute_ev_percent(true_prob, book_price)
-                        if ev < MIN_EV_PERCENT or ev > MAX_EV_PERCENT:
-                            continue
-
-                        if true_prob >= 0.5:
-                            no_vig_american = -(true_prob / (1 - true_prob)) * 100
-                        else:
-                            no_vig_american = ((1 - true_prob) / true_prob) * 100
-
-                        # outcome_name stores "Player Name (Over/Under)" for display
-                        outcome_label = f"{player} {side}"
-
-                        cur.execute("""
-                            INSERT INTO ev_results
-                                (game_id, market_type, outcome_name, point, best_book,
-                                 best_price, sharp_book, sharp_no_vig_price, ev_percent, computed_at)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                        """, (
-                            game_id,
-                            market_type,
-                            outcome_label,
-                            book_point,
-                            bk["key"],
-                            book_price,
-                            sharp_book,
-                            round(no_vig_american, 1),
-                            ev,
-                        ))
-
-                        log.info(
-                            f"    +EV prop: {outcome_label} ({market_type}) | "
-                            f"{bk['key']} {'+' if book_price > 0 else ''}{book_price} | "
-                            f"fair={'+' if no_vig_american > 0 else ''}{no_vig_american:.0f} | "
-                            f"EV={ev:+.2f}%"
-                        )
-
-
 # ─── Main Poll Loop ───────────────────────────────────────────────────────────
 
 def poll_once(rds):
-    """Run one full mainline poll cycle across all sports."""
+    """Run one full poll cycle across all sports."""
     log.info("── Starting poll cycle ──")
     db  = get_db()
     cur = db.cursor()
 
-    total_events  = 0
-    sports_polled = 0
+    total_events   = 0
+    sports_polled  = 0
     sports_skipped = 0
 
-    for sport_key in SPORTS:
-        event_count = check_events_free(sport_key)
-        if event_count == 0:
-            log.info(f"  [{sport_key}] No upcoming events — skipping (0 credits spent)")
-            sports_skipped += 1
-            continue
+    try:
+        for sport_key in SPORTS:
+            # ── Step 1: FREE events check — skip off-season sports ──────────
+            event_count = check_events_free(sport_key)
+            if event_count == 0:
+                log.info(f"  [{sport_key}] No upcoming events — skipping (0 credits spent)")
+                sports_skipped += 1
+                continue
 
-        log.info(f"  [{sport_key}] {event_count} upcoming events — fetching odds...")
+            log.info(f"  [{sport_key}] {event_count} upcoming events — fetching odds...")
 
-        try:
-            events = fetch_odds(sport_key)
-        except requests.HTTPError as e:
-            log.error(f"  HTTP error for {sport_key}: {e}")
-            continue
-        except Exception as e:
-            log.error(f"  Unexpected error for {sport_key}: {e}")
-            continue
+            # ── Step 2: Fetch odds (costs credits) ──────────────────────────
+            try:
+                events = fetch_odds(sport_key)
+            except requests.HTTPError as e:
+                log.error(f"  HTTP error for {sport_key}: {e}")
+                continue
+            except Exception as e:
+                log.error(f"  Unexpected error for {sport_key}: {e}")
+                continue
 
-        sports_polled += 1
-        log.info(f"  [{sport_key}] Got {len(events)} events with odds")
+            sports_polled += 1
+            log.info(f"  [{sport_key}] Got {len(events)} events with odds")
 
-        for event in events:
-            game_id = upsert_game(cur, event, sport_key)
-            for bookmaker in event.get("bookmakers", []):
-                store_odds_snapshot(cur, game_id, bookmaker)
-            compute_ev_for_event(cur, game_id, event)
-            total_events += 1
+            for event in events:
+                game_id = upsert_game(cur, event, sport_key)
 
-    db.commit()
+                for bookmaker in event.get("bookmakers", []):
+                    store_odds_snapshot(cur, game_id, bookmaker)
 
-    # Mark games that have already started as completed so they stop showing in results
-    cur.execute("""
-        UPDATE games SET completed = TRUE
-        WHERE completed = FALSE
-          AND commence_time < NOW() - INTERVAL '30 minutes'
-    """)
-    db.commit()
-    credits_used_this_cycle = sports_polled * 3
+                compute_ev_for_event(cur, game_id, event)
+                total_events += 1
+
+        db.commit()
+
+    except Exception as e:
+        log.error(f"  Poll cycle error, rolling back: {e}", exc_info=True)
+        db.rollback()
+        raise
+    finally:
+        # Always close the connection, even if something above threw
+        cur.close()
+        db.close()
+
+    credits_used_this_cycle = sports_polled * 3  # 3 markets × 1 region-equiv
     log.info(
         f"── Poll complete: {sports_polled} sports polled, {sports_skipped} skipped, "
         f"{total_events} events processed. "
         f"Est. credits this cycle: ~{credits_used_this_cycle} ──\n"
     )
 
+    # Cache a summary in Redis for the backend to read instantly
     summary = {
-        "last_poll":         datetime.now(timezone.utc).isoformat(),
-        "sports_polled":     sports_polled,
-        "sports_skipped":    sports_skipped,
-        "events_processed":  total_events,
-        "est_credits_cycle": credits_used_this_cycle,
+        "last_poll":           datetime.now(timezone.utc).isoformat(),
+        "sports_polled":       sports_polled,
+        "sports_skipped":      sports_skipped,
+        "events_processed":    total_events,
+        "est_credits_cycle":   credits_used_this_cycle,
     }
     rds.set("poll:last_summary", json.dumps(summary), ex=3600)
-
-    cur.close()
-    db.close()
-
-
-def poll_props_once(rds):
-    """
-    Manually-triggered MLB props poll.
-    Triggered by 'props:poll_requested' Redis key set by the backend.
-    Fetches prop odds for every upcoming MLB game, computes EV, stores results.
-    Credit cost: ~5 credits per game (5 prop markets × 1 region).
-    """
-    log.info("── Starting MLB props poll (manual trigger) ──")
-
-    rds.set("props:poll_status", json.dumps({
-        "status": "running",
-        "started_at": datetime.now(timezone.utc).isoformat(),
-    }), ex=300)
-
-    # Get upcoming MLB game list via the FREE /events endpoint
-    try:
-        resp = requests.get(
-            f"{ODDS_API_BASE}/sports/baseball_mlb/events",
-            params={"apiKey": ODDS_API_KEY},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        events_list = resp.json()
-    except Exception as e:
-        log.error(f"  Failed to fetch MLB events for props: {e}")
-        rds.set("props:poll_status", json.dumps({"status": "error", "message": str(e)}), ex=300)
-        return
-
-    if not events_list:
-        log.info("  No upcoming MLB events — nothing to poll")
-        rds.set("props:poll_status", json.dumps({
-            "status": "done", "games_polled": 0, "props_found": 0,
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-        }), ex=3600)
-        return
-
-    log.info(f"  Found {len(events_list)} upcoming MLB events")
-
-    db  = get_db()
-    cur = db.cursor()
-    games_polled = 0
-
-    for event_meta in events_list:
-        event_id = event_meta["id"]
-        log.info(f"  Fetching props: {event_meta.get('away_team')} @ {event_meta.get('home_team')}")
-
-        event_data = fetch_props_for_game(event_id, "baseball_mlb")
-        if not event_data:
-            continue
-
-        game_id = upsert_game(cur, event_data, "baseball_mlb")
-        compute_ev_for_props(cur, game_id, event_data)
-        games_polled += 1
-
-    db.commit()
-
-    # Count prop EV rows inserted in the last 10 minutes
-    cur.execute("""
-        SELECT COUNT(*) FROM ev_results
-        WHERE market_type = ANY(%s)
-          AND computed_at > NOW() - INTERVAL '10 minutes'
-    """, (MLB_PROP_MARKETS,))
-    props_found = cur.fetchone()[0]
-
-    est_credits = games_polled * len(MLB_PROP_MARKETS)
-    log.info(
-        f"── Props poll complete: {games_polled} games, "
-        f"{props_found} prop edges found, ~{est_credits} credits used ──\n"
-    )
-
-    rds.set("props:poll_status", json.dumps({
-        "status":       "done",
-        "completed_at": datetime.now(timezone.utc).isoformat(),
-        "games_polled": games_polled,
-        "props_found":  props_found,
-        "est_credits":  est_credits,
-    }), ex=3600)
-
-    cur.close()
-    db.close()
-
-
-def is_paused(rds) -> bool:
-    """Check Redis for a pause flag set by the backend UI."""
-    return rds.get("poller:paused") == "1"
 
 
 def main():
@@ -695,33 +438,14 @@ def main():
     rds = get_redis()
 
     while True:
-        # ── Check for manual props poll request (fires immediately) ──────────
-        if rds.get("props:poll_requested") == "1":
-            rds.delete("props:poll_requested")
-            try:
-                poll_props_once(rds)
-            except Exception as e:
-                log.error(f"Props poll failed: {e}", exc_info=True)
-                rds.set("props:poll_status", json.dumps({"status": "error", "message": str(e)}), ex=300)
+        try:
+            poll_once(rds)
+        except Exception as e:
+            log.error(f"Poll cycle failed: {e}", exc_info=True)
 
-        # ── Regular mainline poll ─────────────────────────────────────────────
-        if is_paused(rds):
-            log.info("Poller is PAUSED — skipping poll cycle. Resume via dashboard.")
-        else:
-            try:
-                poll_once(rds)
-            except Exception as e:
-                log.error(f"Poll cycle failed: {e}", exc_info=True)
-
-        # Sleep in 10s increments; wake early if a props request comes in
         log.info(f"Sleeping {POLL_INTERVAL}s until next poll...")
-        for _ in range(POLL_INTERVAL // 10):
-            time.sleep(10)
-            if rds.get("props:poll_requested") == "1":
-                log.info("Props poll requested — waking early")
-                break
+        time.sleep(POLL_INTERVAL)
 
 
 if __name__ == "__main__":
     main()
-

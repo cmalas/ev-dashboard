@@ -15,11 +15,9 @@ function App() {
   const [error, setError]         = useState(null);
   const [lastRefresh, setLastRefresh] = useState(null);
 
-  // Poller pause/resume state
-  const [pollerPaused,    setPollerPaused]    = useState(false);
-  const [pollerToggling,  setPollerToggling]  = useState(false);
+  const [pollerPaused,   setPollerPaused]   = useState(false);
+  const [pollerToggling, setPollerToggling] = useState(false);
 
-  // Filter state
   const [filters, setFilters] = useState({
     sport:      '',
     market:     '',
@@ -33,7 +31,6 @@ function App() {
       const r = await fetch(`${API}/status`);
       const data = await r.json();
       setStatus(data);
-      // Keep pollerPaused in sync with what the backend reports
       if (data.paused !== undefined) {
         setPollerPaused(data.paused);
       }
@@ -91,18 +88,15 @@ function App() {
     }
   }, [pollerPaused]);
 
-  // Initial load
   useEffect(() => {
     fetchMeta();
     fetchStatus();
   }, [fetchMeta, fetchStatus]);
 
-  // Refetch EV when filters change
   useEffect(() => {
     fetchEV();
   }, [fetchEV]);
 
-  // Auto-refresh every 2 minutes
   useEffect(() => {
     const id = setInterval(() => {
       fetchEV();
@@ -110,6 +104,9 @@ function App() {
     }, 120_000);
     return () => clearInterval(id);
   }, [fetchEV, fetchStatus]);
+
+  // Count props in results for badge
+  const propsCount = evData.filter(r => r.is_prop).length;
 
   return (
     <div className="app">
@@ -154,7 +151,11 @@ function App() {
                 </span>
               )}
             </div>
-            <div className="props-badge">Props coming soon</div>
+            {propsCount > 0 && (
+              <div className="props-badge props-badge-live">
+                🟢 {propsCount} prop {propsCount === 1 ? 'edge' : 'edges'}
+              </div>
+            )}
           </div>
 
           {!loading && !error && evData.length === 0 && (
@@ -173,7 +174,7 @@ function App() {
       </main>
 
       <footer className="app-footer">
-        <span>Sharp line: Pinnacle (devigged). For informational purposes only. Bet responsibly.</span>
+        <span>Sharp line: Pinnacle/consensus (devigged). For informational purposes only. Bet responsibly.</span>
       </footer>
     </div>
   );

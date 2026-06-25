@@ -2,7 +2,6 @@
 EV Dashboard Backend API
 ------------------------
 FastAPI service that serves +EV opportunities and game data to the frontend.
-Props-ready: all endpoints accept an optional market_type filter.
 """
 
 import os
@@ -31,7 +30,6 @@ PG_USER = os.getenv("POSTGRES_USER", "evuser")
 PG_PASS = os.environ["POSTGRES_PASSWORD"]
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 
-# Redis key used to signal the poller to pause/resume
 POLLER_PAUSE_KEY = "poller:paused"
 
 SPORT_LABELS = {
@@ -43,9 +41,25 @@ SPORT_LABELS = {
 }
 
 MARKET_LABELS = {
+    # Mainlines
     "h2h":     "Moneyline",
     "spreads":  "Spread",
     "totals":   "Total",
+    # MLB props
+    "batter_hits":             "Hits",
+    "batter_home_runs":        "Home Runs",
+    "batter_runs_scored":      "Runs Scored",
+    "batter_total_bases":      "Total Bases",
+    "pitcher_strikeouts":      "Strikeouts",
+    "pitcher_innings_pitched": "Innings Pitched",
+    "pitcher_hits_allowed":    "Hits Allowed",
+}
+
+# Which market_type values are props (used to tag rows)
+PROP_MARKET_KEYS = {
+    "batter_hits", "batter_home_runs", "batter_runs_scored",
+    "batter_total_bases", "pitcher_strikeouts",
+    "pitcher_innings_pitched", "pitcher_hits_allowed",
 }
 
 BOOK_LABELS = {
@@ -60,6 +74,7 @@ BOOK_LABELS = {
     "pinnacle":    "Pinnacle",
     "circa":       "Circa",
     "betonline_ag":"BetOnline",
+    "consensus":   "Consensus",
 }
 
 
@@ -75,12 +90,6 @@ def get_redis():
 
 
 def fmt_american(price) -> str:
-    """
-    Format American odds with explicit + sign for positives.
-    Uses round(float()) rather than int() to avoid silently truncating
-    Decimal values that come out of Postgres NUMERIC columns (e.g. 143.5 -> 144
-    rather than 143).
-    """
     if price is None:
         return "N/A"
     p = round(float(price))
@@ -96,7 +105,6 @@ def health():
 
 @app.get("/api/status")
 def status():
-    """Returns last poll summary and current poller pause state from Redis."""
     rds = get_redis()
     raw = rds.get("poll:last_summary")
     paused = rds.get(POLLER_PAUSE_KEY) == "1"
@@ -109,7 +117,6 @@ def status():
 
 @app.post("/api/poller/pause")
 def pause_poller():
-    """Signal the poller to pause after its current cycle completes."""
     rds = get_redis()
     rds.set(POLLER_PAUSE_KEY, "1")
     return {"paused": True}
@@ -117,7 +124,6 @@ def pause_poller():
 
 @app.post("/api/poller/resume")
 def resume_poller():
-    """Signal the poller to resume normal polling."""
     rds = get_redis()
     rds.delete(POLLER_PAUSE_KEY)
     return {"paused": False}
@@ -125,16 +131,14 @@ def resume_poller():
 
 @app.get("/api/ev")
 def get_ev_opportunities(
-    sport: Optional[str] = Query(None, description="Filter by sport key, e.g. 'basketball_nba'"),
-    market: Optional[str] = Query(None, description="Filter by market type: h2h, spreads, totals"),
-    book: Optional[str]   = Query(None, description="Filter by bookmaker key, e.g. 'draftkings'"),
-    min_ev: float         = Query(1.0,  description="Minimum EV% to return"),
-    hours_ahead: int      = Query(48,   description="Only show games starting within this many hours"),
+    sport: Optional[str]   = Query(None),
+    market: Optional[str]  = Query(None),
+    book: Optional[str]    = Query(None),
+    min_ev: float          = Query(1.0),
+    hours_ahead: int       = Query(48),
+    props_only: bool       = Query(False, description="Return only player prop results"),
+    no_props: bool         = Query(False, description="Exclude player prop results"),
 ):
-    """
-    Returns all current +EV opportunities, joining with game info.
-    Sorted by EV% descending. Only shows upcoming games.
-    """
     db  = get_db()
     cur = db.cursor()
 
@@ -162,7 +166,6 @@ def get_ev_opportunities(
             AND g.commence_time > NOW()
             AND g.commence_time < NOW() + make_interval(hours => %s)
             AND g.completed = FALSE
-            -- Only keep the most recent EV result per (game, market, outcome, book)
             AND ev.computed_at = (
                 SELECT MAX(ev2.computed_at)
                 FROM ev_results ev2
@@ -183,6 +186,12 @@ def get_ev_opportunities(
     if book:
         query += " AND ev.best_book = %s"
         params.append(book)
+    if props_only:
+        prop_keys = ", ".join(f"'{k}'" for k in PROP_MARKET_KEYS)
+        query += f" AND ev.market_type IN ({prop_keys})"
+    if no_props:
+        prop_keys = ", ".join(f"'{k}'" for k in PROP_MARKET_KEYS)
+        query += f" AND ev.market_type NOT IN ({prop_keys})"
 
     query += " ORDER BY ev.ev_percent DESC LIMIT 200"
 
@@ -193,6 +202,7 @@ def get_ev_opportunities(
 
     results = []
     for r in rows:
+        is_prop = r["market_type"] in PROP_MARKET_KEYS
         results.append({
             "id":             r["id"],
             "sport_key":      r["sport_key"],
@@ -204,6 +214,7 @@ def get_ev_opportunities(
             },
             "market_type":    r["market_type"],
             "market_label":   MARKET_LABELS.get(r["market_type"], r["market_type"]),
+            "is_prop":        is_prop,
             "outcome_name":   r["outcome_name"],
             "point":          float(r["point"]) if r["point"] is not None else None,
             "book":           r["best_book"],
@@ -221,7 +232,6 @@ def get_ev_opportunities(
 
 @app.get("/api/sports")
 def get_sports():
-    """Returns the active sports with current event counts."""
     db  = get_db()
     cur = db.cursor()
     cur.execute("""
@@ -246,7 +256,6 @@ def get_sports():
 
 @app.get("/api/books")
 def get_books():
-    """Returns all bookmakers seen in EV results."""
     db  = get_db()
     cur = db.cursor()
     cur.execute("""

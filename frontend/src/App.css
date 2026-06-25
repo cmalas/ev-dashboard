@@ -387,3 +387,42 @@ html, body, #root {
   background: var(--bg-surface);
   text-align: center;
 }
+
+/* ── Prop market pills (smaller, green tint) ───────────────── */
+.pill-btn-prop {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #10b981;
+}
+.pill-btn-prop:hover {
+  border-color: #10b981;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+}
+.pill-btn-prop.active {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: #10b981;
+  color: #10b981;
+}
+
+/* Prop row highlight */
+.ev-table tbody tr.prop-row {
+  background: rgba(16, 185, 129, 0.02);
+}
+.ev-table tbody tr.prop-row:hover {
+  background: rgba(16, 185, 129, 0.06);
+}
+
+/* Props live badge */
+.props-badge-live {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  border-radius: 20px;
+  padding: 3px 10px;
+  background: rgba(16, 185, 129, 0.08);
+}

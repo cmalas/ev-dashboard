@@ -7,16 +7,18 @@ import StatusBar from './components/StatusBar';
 const API = '/api';
 
 function App() {
-  const [evData, setEvData]       = useState([]);
-  const [sports, setSports]       = useState([]);
-  const [books, setBooks]         = useState([]);
-  const [status, setStatus]       = useState(null);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState(null);
+  const [evData, setEvData]         = useState([]);
+  const [sports, setSports]         = useState([]);
+  const [books, setBooks]           = useState([]);
+  const [status, setStatus]         = useState(null);
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState(null);
   const [lastRefresh, setLastRefresh] = useState(null);
 
   const [pollerPaused,   setPollerPaused]   = useState(false);
   const [pollerToggling, setPollerToggling] = useState(false);
+  const [wakeOverride,   setWakeOverride]   = useState(false);
+  const [wakeToggling,   setWakeToggling]   = useState(false);
 
   const [filters, setFilters] = useState({
     sport:      '',
@@ -28,12 +30,11 @@ function App() {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const r = await fetch(`${API}/status`);
+      const r    = await fetch(`${API}/status`);
       const data = await r.json();
       setStatus(data);
-      if (data.paused !== undefined) {
-        setPollerPaused(data.paused);
-      }
+      if (data.paused       !== undefined) setPollerPaused(data.paused);
+      if (data.wake_override !== undefined) setWakeOverride(data.wake_override);
     } catch (_) {}
   }, []);
 
@@ -43,10 +44,8 @@ function App() {
         fetch(`${API}/sports`),
         fetch(`${API}/books`),
       ]);
-      const sData = await sRes.json();
-      const bData = await bRes.json();
-      setSports(sData.sports || []);
-      setBooks(bData.books || []);
+      setSports((await sRes.json()).sports || []);
+      setBooks((await bRes.json()).books   || []);
     } catch (_) {}
   }, []);
 
@@ -55,10 +54,10 @@ function App() {
     setError(null);
     try {
       const params = new URLSearchParams();
-      if (filters.sport)  params.set('sport', filters.sport);
-      if (filters.market) params.set('market', filters.market);
-      if (filters.book)   params.set('book', filters.book);
-      params.set('min_ev', filters.minEv);
+      if (filters.sport)  params.set('sport',       filters.sport);
+      if (filters.market) params.set('market',      filters.market);
+      if (filters.book)   params.set('book',        filters.book);
+      params.set('min_ev',      filters.minEv);
       params.set('hours_ahead', filters.hoursAhead);
 
       const r = await fetch(`${API}/ev?${params}`);
@@ -77,8 +76,7 @@ function App() {
     setPollerToggling(true);
     try {
       const endpoint = pollerPaused ? 'resume' : 'pause';
-      const r = await fetch(`${API}/poller/${endpoint}`, { method: 'POST' });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const r    = await fetch(`${API}/poller/${endpoint}`, { method: 'POST' });
       const data = await r.json();
       setPollerPaused(data.paused);
     } catch (e) {
@@ -88,24 +86,39 @@ function App() {
     }
   }, [pollerPaused]);
 
-  useEffect(() => {
-    fetchMeta();
-    fetchStatus();
-  }, [fetchMeta, fetchStatus]);
+  const handleWake = useCallback(async () => {
+    setWakeToggling(true);
+    try {
+      const r    = await fetch(`${API}/poller/wake`, { method: 'POST' });
+      const data = await r.json();
+      setWakeOverride(data.wake_override);
+    } catch (e) {
+      console.error('Failed to wake poller:', e);
+    } finally {
+      setWakeToggling(false);
+    }
+  }, []);
 
-  useEffect(() => {
-    fetchEV();
-  }, [fetchEV]);
+  const handleSleep = useCallback(async () => {
+    setWakeToggling(true);
+    try {
+      const r    = await fetch(`${API}/poller/sleep`, { method: 'POST' });
+      const data = await r.json();
+      setWakeOverride(data.wake_override);
+    } catch (e) {
+      console.error('Failed to sleep poller:', e);
+    } finally {
+      setWakeToggling(false);
+    }
+  }, []);
 
+  useEffect(() => { fetchMeta(); fetchStatus(); }, [fetchMeta, fetchStatus]);
+  useEffect(() => { fetchEV(); },                  [fetchEV]);
   useEffect(() => {
-    const id = setInterval(() => {
-      fetchEV();
-      fetchStatus();
-    }, 120_000);
+    const id = setInterval(() => { fetchEV(); fetchStatus(); }, 120_000);
     return () => clearInterval(id);
   }, [fetchEV, fetchStatus]);
 
-  // Count props in results for badge
   const propsCount = evData.filter(r => r.is_prop).length;
 
   return (
@@ -126,17 +139,16 @@ function App() {
             pollerPaused={pollerPaused}
             onTogglePoller={handleTogglePoller}
             pollerToggling={pollerToggling}
+            wakeOverride={wakeOverride}
+            onWake={handleWake}
+            onSleep={handleSleep}
+            wakeToggling={wakeToggling}
           />
         </div>
       </header>
 
       <main className="app-main">
-        <Filters
-          sports={sports}
-          books={books}
-          filters={filters}
-          onChange={setFilters}
-        />
+        <Filters sports={sports} books={books} filters={filters} onChange={setFilters} />
 
         <section className="results-section">
           <div className="results-header">

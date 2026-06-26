@@ -61,7 +61,7 @@ const SORT_KEYS = {
 
 export default function EVTable({ rows, loading }) {
   const [sortKey, setSortKey] = useState('ev');
-  const [sortDir, setSortDir] = useState(-1);
+  const [sortDir, setSortDir] = useState(1);
 
   const handleSort = (key) => {
     if (sortKey === key) {

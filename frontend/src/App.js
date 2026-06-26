@@ -25,7 +25,7 @@ function App() {
     market:     '',
     book:       '',
     minEv:      1.0,
-    hoursAhead: 48,
+    hoursAhead: 12,
   });
 
   const fetchStatus = useCallback(async () => {

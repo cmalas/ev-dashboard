@@ -5,7 +5,15 @@ const MARKETS = [
   { key: 'h2h',     label: 'Moneyline' },
   { key: 'spreads', label: 'Spread' },
   { key: 'totals',  label: 'Total' },
-  // props: add here later
+  // Props — shown as a group separator then individual markets
+  { key: '__props_divider__', label: '── Props ──', disabled: true },
+  { key: 'batter_hits',             label: 'Hits' },
+  { key: 'batter_home_runs',        label: 'Home Runs' },
+  { key: 'batter_runs_scored',      label: 'Runs Scored' },
+  { key: 'batter_total_bases',      label: 'Total Bases' },
+  { key: 'pitcher_strikeouts',      label: 'Strikeouts' },
+  { key: 'pitcher_innings_pitched', label: 'Innings Pitched' },
+  { key: 'pitcher_hits_allowed',    label: 'Hits Allowed' },
 ];
 
 const HOURS = [
@@ -38,10 +46,10 @@ export default function Filters({ sports, books, filters, onChange }) {
       <div className="filter-group">
         <label className="filter-label">Market</label>
         <div className="pill-group">
-          {MARKETS.map(m => (
+          {MARKETS.filter(m => !m.disabled).map(m => (
             <button
               key={m.key}
-              className={`pill-btn ${filters.market === m.key ? 'active' : ''}`}
+              className={`pill-btn ${filters.market === m.key ? 'active' : ''} ${m.key.startsWith('batter_') || m.key.startsWith('pitcher_') ? 'pill-btn-prop' : ''}`}
               onClick={() => onChange(prev => ({ ...prev, market: m.key }))}
             >
               {m.label}

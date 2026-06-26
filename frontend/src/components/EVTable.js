@@ -1,17 +1,17 @@
 import React, { useState } from 'react';
 
 const MARKET_COLORS = {
-  h2h:                '#3b82f6',
-  spreads:            '#8b5cf6',
-  totals:             '#f59e0b',
-  batter_hits:        '#10b981',
-  batter_home_runs:   '#10b981',
-  batter_total_bases: '#10b981',
-  batter_rbis:        '#10b981',
-  pitcher_strikeouts: '#f97316',
+  h2h:                      '#3b82f6',
+  spreads:                  '#8b5cf6',
+  totals:                   '#f59e0b',
+  batter_hits:              '#10b981',
+  batter_home_runs:         '#10b981',
+  batter_runs_scored:       '#10b981',
+  batter_total_bases:       '#10b981',
+  pitcher_strikeouts:       '#10b981',
+  pitcher_innings_pitched:  '#10b981',
+  pitcher_hits_allowed:     '#10b981',
 };
-
-const PROP_COLOR = '#10b981';
 
 function EVBar({ ev }) {
   const pct = Math.min((ev / 10) * 100, 100);
@@ -36,6 +36,10 @@ function formatTime(iso) {
 
 function formatOutcome(row) {
   const { outcome_name, market_type, point } = row;
+  // Props: outcome_name already includes "Over/Under PlayerName", point is the line
+  if (row.is_prop && point != null) {
+    return `${outcome_name} (${point})`;
+  }
   if (market_type === 'spreads' && point != null) {
     return `${outcome_name} ${point > 0 ? '+' : ''}${point}`;
   }
@@ -43,15 +47,6 @@ function formatOutcome(row) {
     return `${outcome_name} ${point}`;
   }
   return outcome_name;
-}
-
-// For props: outcome_name is "Player Name Over/Under", split them out
-function parsePropsOutcome(outcome_name, point) {
-  const lastSpace = outcome_name.lastIndexOf(' ');
-  const side   = outcome_name.slice(lastSpace + 1);   // "Over" or "Under"
-  const player = outcome_name.slice(0, lastSpace);
-  const line   = point != null ? ` ${point}` : '';
-  return { player, side: `${side}${line}` };
 }
 
 const SORT_KEYS = {
@@ -62,10 +57,9 @@ const SORT_KEYS = {
   book:    (r) => r.book_label,
   price:   (r) => r.book_price,
   time:    (r) => r.game.commence_time,
-  player:  (r) => r.outcome_name,
 };
 
-export default function EVTable({ rows, loading, isProps }) {
+export default function EVTable({ rows, loading }) {
   const [sortKey, setSortKey] = useState('ev');
   const [sortDir, setSortDir] = useState(-1);
 
@@ -81,8 +75,8 @@ export default function EVTable({ rows, loading, isProps }) {
   const sorted = [...rows].sort((a, b) => {
     const fn = SORT_KEYS[sortKey] || SORT_KEYS.ev;
     const va = fn(a), vb = fn(b);
-    if (va < vb) return -sortDir;
-    if (va > vb) return sortDir;
+    if (va < vb) return sortDir;
+    if (va > vb) return -sortDir;
     return 0;
   });
 
@@ -101,65 +95,56 @@ export default function EVTable({ rows, loading, isProps }) {
       <table className="ev-table">
         <thead>
           <tr>
-            {!isProps && <ColHead label="Sport"  sortId="sport"  />}
-            <ColHead label="Game"    sortId="game"   />
-            <ColHead label="Time"    sortId="time"   />
-            <ColHead label="Market"  sortId="market" />
-            {isProps
-              ? <ColHead label="Player"  sortId="player" />
-              : <th>Outcome</th>
-            }
-            {isProps && <th>Line</th>}
-            <ColHead label="Book"    sortId="book"   />
-            <ColHead label="Price"   sortId="price"  />
+            <ColHead label="Sport"  sortId="sport"  />
+            <ColHead label="Game"   sortId="game"   />
+            <ColHead label="Time"   sortId="time"   />
+            <ColHead label="Market" sortId="market" />
+            <th>Outcome</th>
+            <ColHead label="Book"   sortId="book"   />
+            <ColHead label="Price"  sortId="price"  />
             <th>Fair</th>
-            <ColHead label="Edge"    sortId="ev"     />
+            <ColHead label="Edge"   sortId="ev"     />
           </tr>
         </thead>
         <tbody>
-          {sorted.map((row) => {
-            const propParsed = isProps ? parsePropsOutcome(row.outcome_name, row.point) : null;
-            const marketColor = MARKET_COLORS[row.market_type] || PROP_COLOR;
-            return (
-              <tr key={row.id} className={`ev-row ${row.ev_percent >= 5 ? 'high-ev' : ''}`}>
-                {!isProps && (
-                  <td><span className="sport-pill">{row.sport_label}</span></td>
-                )}
-                <td className="game-cell">
-                  <span className="away-team">{row.game.away_team}</span>
-                  <span className="at-sym"> @ </span>
-                  <span className="home-team">{row.game.home_team}</span>
-                </td>
-                <td className="time-cell">{formatTime(row.game.commence_time)}</td>
-                <td>
-                  <span
-                    className="market-pill"
-                    style={{ background: marketColor + '22', color: marketColor }}
-                  >
-                    {row.market_label}
-                  </span>
-                </td>
-                {isProps ? (
-                  <>
-                    <td className="outcome-cell player-name">{propParsed.player}</td>
-                    <td className="prop-side-cell">
-                      <span className={`prop-side ${propParsed.side.startsWith('Over') ? 'over' : 'under'}`}>
-                        {propParsed.side}
-                      </span>
-                    </td>
-                  </>
-                ) : (
-                  <td className="outcome-cell">{formatOutcome(row)}</td>
-                )}
-                <td className="book-cell">{row.book_label}</td>
-                <td className="price-cell mono">{row.book_price_fmt}</td>
-                <td className="fair-cell mono muted">{row.fair_price_fmt}</td>
-                <td className="ev-cell">
-                  <EVBar ev={row.ev_percent} />
-                </td>
-              </tr>
-            );
-          })}
+          {sorted.map((row) => (
+            <tr
+              key={row.id}
+              className={[
+                'ev-row',
+                row.ev_percent >= 5 ? 'high-ev' : '',
+                row.is_prop ? 'prop-row' : '',
+              ].filter(Boolean).join(' ')}
+            >
+              <td>
+                <span className="sport-pill">{row.sport_label}</span>
+              </td>
+              <td className="game-cell">
+                <span className="away-team">{row.game.away_team}</span>
+                <span className="at-sym"> @ </span>
+                <span className="home-team">{row.game.home_team}</span>
+              </td>
+              <td className="time-cell">{formatTime(row.game.commence_time)}</td>
+              <td>
+                <span
+                  className="market-pill"
+                  style={{
+                    background: (MARKET_COLORS[row.market_type] || '#64748b') + '22',
+                    color: MARKET_COLORS[row.market_type] || '#64748b',
+                  }}
+                >
+                  {row.market_label}
+                </span>
+              </td>
+              <td className="outcome-cell">{formatOutcome(row)}</td>
+              <td className="book-cell">{row.book_label}</td>
+              <td className="price-cell mono">{row.book_price_fmt}</td>
+              <td className="fair-cell mono muted">{row.fair_price_fmt}</td>
+              <td className="ev-cell">
+                <EVBar ev={row.ev_percent} />
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>

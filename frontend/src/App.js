@@ -26,6 +26,7 @@ function App() {
     book:       '',
     minEv:      1.0,
     hoursAhead: 12,
+    maxOdds:    9999,
   });
 
   const fetchStatus = useCallback(async () => {
@@ -119,7 +120,8 @@ function App() {
     return () => clearInterval(id);
   }, [fetchEV, fetchStatus]);
 
-  const propsCount = evData.filter(r => r.is_prop).length;
+  const propsCount    = evData.filter(r => r.is_prop).length;
+  const filteredData  = evData.filter(r => r.book_price <= filters.maxOdds);
 
   return (
     <div className="app">
@@ -159,7 +161,7 @@ function App() {
                 <span className="error-text">Error: {error}</span>
               ) : (
                 <span>
-                  <strong>{evData.length}</strong> {evData.length === 1 ? 'opportunity' : 'opportunities'} found
+                  <strong>{filteredData.length}</strong> {filteredData.length === 1 ? 'opportunity' : 'opportunities'} found
                 </span>
               )}
             </div>
@@ -170,7 +172,7 @@ function App() {
             )}
           </div>
 
-          {!loading && !error && evData.length === 0 && (
+          {!loading && !error && filteredData.length === 0 && (
             <div className="empty-state">
               <div className="empty-icon">📊</div>
               <h3>No edges found</h3>
@@ -179,8 +181,8 @@ function App() {
             </div>
           )}
 
-          {!error && evData.length > 0 && (
-            <EVTable rows={evData} loading={loading} />
+          {!error && filteredData.length > 0 && (
+            <EVTable rows={filteredData} loading={loading} />
           )}
         </section>
       </main>

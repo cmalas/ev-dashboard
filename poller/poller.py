@@ -69,6 +69,9 @@ TARGET_BOOKS = [
     "espnbet", "fanatics", "betrivers", "bet365",
 ]
 
+# Books unavailable in Missouri — exclude from EV results and consensus
+EXCLUDED_BOOKS = {"betparx", "hardrockbet", "hardrockbet_oh", "fliff", "ballybet"}
+
 # 10 books = 1 region-equivalent = 3 credits/sport for mainlines
 ALL_BOOKS        = SHARP_BOOKS + TARGET_BOOKS[:7]
 BOOKMAKERS_PARAM = ",".join(ALL_BOOKS)
@@ -92,7 +95,6 @@ PROPS_SPORTS = {
         "batter_runs_scored",
         "batter_total_bases",
         "pitcher_strikeouts",
-        "pitcher_innings_pitched",
         "pitcher_hits_allowed",
     ],
 }
@@ -107,7 +109,6 @@ PROP_MARKET_LABELS = {
     "batter_runs_scored":      "Runs Scored",
     "batter_total_bases":      "Total Bases",
     "pitcher_strikeouts":      "Strikeouts",
-    "pitcher_innings_pitched": "Innings Pitched",
     "pitcher_hits_allowed":    "Hits Allowed",
 }
 
@@ -511,6 +512,7 @@ def compute_ev_for_props(cur, game_id: int, event_data: dict, sport_key: str):
                 bk: sides for bk, sides in book_data.items()
                 if "over" in sides and "under" in sides
                 and sides["over"].get("point") is not None
+                and bk not in EXCLUDED_BOOKS
             }
             if len(books_with_both) < 2:
                 continue
@@ -552,6 +554,8 @@ def compute_ev_for_props(cur, game_id: int, event_data: dict, sport_key: str):
             no_vig_under = true_prob_to_american(consensus_true_under)
 
             for bk, sides in books_with_both.items():
+                if bk in EXCLUDED_BOOKS:
+                    continue
                 for side, true_prob, no_vig in [
                     ("Over",  consensus_true_over,  no_vig_over),
                     ("Under", consensus_true_under, no_vig_under),

@@ -5,14 +5,12 @@ const MARKETS = [
   { key: 'h2h',     label: 'Moneyline' },
   { key: 'spreads', label: 'Spread' },
   { key: 'totals',  label: 'Total' },
-  // Props — shown as a group separator then individual markets
   { key: '__props_divider__', label: '── Props ──', disabled: true },
   { key: 'batter_hits',             label: 'Hits' },
   { key: 'batter_home_runs',        label: 'Home Runs' },
   { key: 'batter_runs_scored',      label: 'Runs Scored' },
   { key: 'batter_total_bases',      label: 'Total Bases' },
   { key: 'pitcher_strikeouts',      label: 'Strikeouts' },
-  { key: 'pitcher_innings_pitched', label: 'Innings Pitched' },
   { key: 'pitcher_hits_allowed',    label: 'Hits Allowed' },
 ];
 
@@ -21,6 +19,14 @@ const HOURS = [
   { value: 24,  label: 'Next 24h' },
   { value: 48,  label: 'Next 48h' },
   { value: 168, label: 'Next 7 days' },
+];
+
+const MAX_ODDS_OPTIONS = [
+  { value: 200,  label: '+200' },
+  { value: 300,  label: '+300' },
+  { value: 500,  label: '+500' },
+  { value: 1000, label: '+1000' },
+  { value: 9999, label: 'Any' },
 ];
 
 export default function Filters({ sports, books, filters, onChange }) {
@@ -82,6 +88,21 @@ export default function Filters({ sports, books, filters, onChange }) {
           onChange={set('minEv')}
         />
         <div className="range-labels"><span>0.5%</span><span>10%</span></div>
+      </div>
+
+      <div className="filter-group">
+        <label className="filter-label">Max Odds</label>
+        <div className="pill-group">
+          {MAX_ODDS_OPTIONS.map(o => (
+            <button
+              key={o.value}
+              className={`pill-btn ${filters.maxOdds === o.value ? 'active' : ''}`}
+              onClick={() => onChange(prev => ({ ...prev, maxOdds: o.value }))}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="filter-group">

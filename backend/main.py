@@ -101,12 +101,12 @@ def fmt_american(price) -> str:
 def is_quiet_hours() -> bool:
     if QUIET_HOURS_START == QUIET_HOURS_END:
         return False
-    hour = datetime.now().hour
+    import zoneinfo
+    hour = datetime.now(zoneinfo.ZoneInfo("America/Chicago")).hour
     if QUIET_HOURS_START < QUIET_HOURS_END:
         return QUIET_HOURS_START <= hour < QUIET_HOURS_END
     else:
         return hour >= QUIET_HOURS_START or hour < QUIET_HOURS_END
-
 
 def seconds_until_quiet_ends() -> int:
     """Seconds until quiet window ends — used as wake override TTL."""

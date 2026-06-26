@@ -109,14 +109,13 @@ def is_quiet_hours() -> bool:
         return hour >= QUIET_HOURS_START or hour < QUIET_HOURS_END
 
 def seconds_until_quiet_ends() -> int:
-    """Seconds until quiet window ends — used as wake override TTL."""
     from datetime import timedelta
-    now = datetime.now()
+    import zoneinfo
+    now = datetime.now(zoneinfo.ZoneInfo("America/Chicago"))
     end = now.replace(hour=QUIET_HOURS_END, minute=0, second=0, microsecond=0)
     if end <= now:
         end += timedelta(days=1)
     return max(int((end - now).total_seconds()), 60)
-
 
 # --- Endpoints ---------------------------------------------------------------
 

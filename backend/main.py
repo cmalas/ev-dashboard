@@ -213,6 +213,7 @@ def get_ev_opportunities(
             AND g.commence_time > NOW()
             AND g.commence_time < NOW() + make_interval(hours => %s)
             AND g.completed = FALSE
+            AND ev.computed_at > NOW() - INTERVAL '2 hours'
             AND ev.computed_at = (
                 SELECT MAX(ev2.computed_at)
                 FROM ev_results ev2

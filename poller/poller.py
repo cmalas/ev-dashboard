@@ -11,7 +11,7 @@ Credit cost per poll cycle (The Odds API v4):
              Props polled every PROPS_CYCLE_INTERVAL mainline cycles
 
 Quiet hours:
-  QUIET_HOURS_START / QUIET_HOURS_END (local server time, 24h integers)
+  QUIET_HOURS_START / QUIET_HOURS_END (America/Chicago time, 24h integers)
   During quiet hours, poll interval stretches to QUIET_POLL_INTERVAL seconds.
   A one-shot wake override (poller:wake_override in Redis) bypasses quiet mode
   until the next quiet window begins, then auto-expires.
@@ -22,7 +22,8 @@ import time
 import json
 import logging
 import statistics
-from datetime import datetime, timezone
+import zoneinfo
+from datetime import datetime, timedelta, timezone
 
 import requests
 import psycopg2
@@ -120,13 +121,13 @@ MAX_SHARP_CONSENSUS_DIFF = 0.15
 
 def is_quiet_hours() -> bool:
     """
-    Returns True if the current local hour falls within the quiet window.
+    Returns True if the current Chicago hour falls within the quiet window.
     Handles overnight ranges (e.g. 22-6) correctly.
     Returns False if start == end (quiet hours disabled).
     """
     if QUIET_HOURS_START == QUIET_HOURS_END:
         return False
-    hour = datetime.now().hour
+    hour = datetime.now(zoneinfo.ZoneInfo("America/Chicago")).hour
     if QUIET_HOURS_START < QUIET_HOURS_END:
         # Simple range e.g. 2-9
         return QUIET_HOURS_START <= hour < QUIET_HOURS_END
@@ -137,14 +138,13 @@ def is_quiet_hours() -> bool:
 
 def seconds_until_quiet_ends() -> int:
     """
-    Returns seconds until QUIET_HOURS_END in local time.
+    Returns seconds until QUIET_HOURS_END in Chicago time.
     Used to set the wake override TTL so it auto-expires when quiet ends.
     """
-    now = datetime.now()
+    now = datetime.now(zoneinfo.ZoneInfo("America/Chicago"))
     end = now.replace(hour=QUIET_HOURS_END, minute=0, second=0, microsecond=0)
     if end <= now:
         # Quiet end is tomorrow
-        from datetime import timedelta
         end += timedelta(days=1)
     return max(int((end - now).total_seconds()), 60)
 
@@ -671,6 +671,14 @@ def poll_once(rds, cycle_number: int):
                     game_id = upsert_game(cur, ev, sport_key)
                     compute_ev_for_props(cur, game_id, event_data, sport_key)
                     props_processed += 1
+
+        # Prune ev_results older than 30 days to prevent unbounded table growth
+        cur.execute(
+            "DELETE FROM ev_results WHERE computed_at < NOW() - INTERVAL '30 days'"
+        )
+        pruned = cur.rowcount
+        if pruned:
+            log.info(f"  Pruned {pruned} stale ev_results rows (>30 days old)")
 
         db.commit()
 

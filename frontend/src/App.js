@@ -121,7 +121,10 @@ function App() {
   }, [fetchEV, fetchStatus]);
 
   const propsCount    = evData.filter(r => r.is_prop).length;
-  const filteredData  = evData.filter(r => r.book_price <= filters.maxOdds);
+  // Negative odds (favorites) are never longshots — only cap positive odds
+  const filteredData  = evData.filter(r =>
+    filters.maxOdds === 9999 || r.book_price < 0 || r.book_price <= filters.maxOdds
+  );
 
   return (
     <div className="app">

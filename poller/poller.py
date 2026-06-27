@@ -54,7 +54,7 @@ REDIS_HOST        = os.getenv("REDIS_HOST", "redis")
 POLLER_PAUSE_KEY         = "poller:paused"
 POLLER_WAKE_OVERRIDE_KEY = "poller:wake_override"
 
-# Quiet hours — server local time (24h integers)
+# Quiet hours — America/Chicago time (24h integers)
 # During this window, poll interval stretches to QUIET_POLL_INTERVAL.
 # Default: 2am-9am. Set to same value (e.g. both 0) to disable quiet hours.
 QUIET_HOURS_START   = int(os.getenv("QUIET_HOURS_START", 2))

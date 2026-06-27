@@ -175,8 +175,17 @@ def get_db():
     )
 
 
-def get_redis():
-    return redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
+def get_redis(retries: int = 5, delay: int = 5):
+    for attempt in range(1, retries + 1):
+        try:
+            client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
+            client.ping()
+            return client
+        except redis.exceptions.ConnectionError as e:
+            log.warning(f"Redis connection attempt {attempt}/{retries} failed: {e}")
+            if attempt < retries:
+                time.sleep(delay)
+    raise RuntimeError(f"Could not connect to Redis at {REDIS_HOST} after {retries} attempts")
 
 
 # --- Odds API ----------------------------------------------------------------
@@ -396,6 +405,10 @@ def find_sharp_odds(bookmakers: list[dict], market_type: str) -> tuple[str | Non
         odds = extract_book_odds(bookmakers, book_key, market_type)
         if odds:
             return book_key, odds
+    present = [b["key"] for b in bookmakers]
+    missing = [k for k in SHARP_BOOKS if k not in present]
+    if missing:
+        log.debug(f"  Sharp books missing from API response ({market_type}): {missing}")
     return None, {}
 
 

@@ -24,7 +24,7 @@ function App() {
     sport:      '',
     market:     '',
     book:       '',
-    minEv:      1.0,
+    minEv:      2.0,
     hoursAhead: 12,
     maxOdds:    9999,
   });
@@ -168,11 +168,9 @@ function App() {
                 </span>
               )}
             </div>
-            {propsCount > 0 && (
-              <div className="props-badge props-badge-live">
-                🟢 {propsCount} prop {propsCount === 1 ? 'edge' : 'edges'}
-              </div>
-            )}
+            <div className={`props-badge ${propsCount > 0 ? 'props-badge-live' : 'props-badge-none'}`}>
+              {propsCount > 0 ? '🟢' : '⚫'} {propsCount} prop {propsCount === 1 ? 'edge' : 'edges'}
+            </div>
           </div>
 
           {!loading && !error && filteredData.length === 0 && (

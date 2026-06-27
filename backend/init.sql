@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS ev_results (
     best_book           VARCHAR(64) NOT NULL,
     best_price          INTEGER NOT NULL,
     sharp_book          VARCHAR(64) NOT NULL DEFAULT 'pinnacle',
-    sharp_no_vig_price  NUMERIC(8,4),       -- devigged fair probability as decimal
+    sharp_no_vig_price  NUMERIC(8,4),       -- devigged fair value in American odds (e.g. -108, +115)
     ev_percent          NUMERIC(6,3),       -- e.g. 3.25 means +3.25% EV
     computed_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -427,6 +427,10 @@ html, body, #root {
   background: rgba(16, 185, 129, 0.08);
 }
 
+.props-badge-none {
+  opacity: 0.35;
+}
+
 /* Quiet hours status dot */
 .status-dot.quiet {
   background: #64748b;

@@ -88,7 +88,12 @@ def get_db():
 
 
 def get_redis():
-    return redis_lib.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
+    try:
+        client = redis_lib.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
+        client.ping()
+        return client
+    except redis_lib.exceptions.ConnectionError as e:
+        raise RuntimeError(f"Redis unavailable at {REDIS_HOST}: {e}") from e
 
 
 def fmt_american(price) -> str:
@@ -221,6 +226,7 @@ def get_ev_opportunities(
                   AND ev2.market_type = ev.market_type
                   AND ev2.outcome_name = ev.outcome_name
                   AND ev2.best_book = ev.best_book
+                  AND (ev2.point = ev.point OR (ev2.point IS NULL AND ev.point IS NULL))
             )
     """
     params = [min_ev, hours_ahead]

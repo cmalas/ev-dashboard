@@ -186,7 +186,8 @@ def status():
         return {**base, "last_poll": None, "message": "No poll completed yet"}
 
     data = json.loads(raw)
-    return {**data, **base}
+    props_last_poll = rds.get("poll:props_last_poll")
+    return {**data, **base, "props_last_poll": props_last_poll}
 
 
 @app.post("/api/poller/pause")
@@ -218,6 +219,14 @@ def wake_poller():
         "expires_in_seconds": ttl,
         "message": f"Override active for ~{ttl // 60} minutes (until quiet hours end)"
     }
+
+
+@app.post("/api/poller/force-sync")
+def force_sync():
+    """Signal the poller to wake immediately and run a full cycle including props."""
+    rds = get_redis()
+    rds.set("poller:force_sync", "1", ex=300)
+    return {"force_sync": True}
 
 
 @app.post("/api/poller/sleep")

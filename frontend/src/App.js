@@ -165,6 +165,21 @@ function App() {
     }
   }, []);
 
+  const [forceSyncing, setForceSyncing] = useState(false);
+  const handleForceSync = useCallback(async () => {
+    setForceSyncing(true);
+    try {
+      await fetch(`${API}/poller/force-sync`, { method: 'POST' });
+      // Poll status after a short delay so the UI reflects the incoming cycle
+      setTimeout(() => { fetchStatus(); fetchCredits(); }, 8000);
+      setTimeout(() => { fetchEV(); fetchStatus(); fetchCredits(); }, 20000);
+    } catch (e) {
+      console.error('Failed to force sync:', e);
+    } finally {
+      setTimeout(() => setForceSyncing(false), 20000);
+    }
+  }, [fetchStatus, fetchCredits, fetchEV]);
+
   useEffect(() => { fetchMeta(); fetchStatus(); fetchBets(); fetchCredits(); }, [fetchMeta, fetchStatus, fetchBets, fetchCredits]);
   useEffect(() => { fetchEV(); },                  [fetchEV]);
   useEffect(() => {
@@ -201,6 +216,8 @@ function App() {
             onSleep={handleSleep}
             wakeToggling={wakeToggling}
             credits={credits}
+            onForceSync={handleForceSync}
+            forceSyncing={forceSyncing}
           />
         </div>
       </header>

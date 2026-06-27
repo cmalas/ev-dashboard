@@ -1,4 +1,12 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+
+function useTick(ms = 10000) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), ms);
+    return () => clearInterval(id);
+  }, [ms]);
+}
 
 function timeSince(iso) {
   if (!iso) return null;
@@ -40,11 +48,18 @@ export default function StatusBar({
   pollerPaused, onTogglePoller, pollerToggling,
   wakeOverride, onWake, onSleep, wakeToggling,
   credits,
+  onForceSync, forceSyncing,
 }) {
-  const lastPoll  = status?.last_poll ? new Date(status.last_poll) : null;
-  const minsAgo   = lastPoll ? Math.floor((Date.now() - lastPoll) / 60000) : null;
-  const quietMode = status?.quiet_mode ?? false;
-  const isStale   = minsAgo === null || minsAgo > 35;
+  useTick(10000);
+  const lastPoll      = status?.last_poll       ? new Date(status.last_poll)       : null;
+  const propsLastPoll = status?.props_last_poll ? new Date(status.props_last_poll) : null;
+  const minsAgo      = lastPoll ? Math.floor((Date.now() - lastPoll) / 60000) : null;
+  const quietMode    = status?.quiet_mode ?? false;
+  const isStale      = minsAgo === null || minsAgo > 35;
+  const secsToNext   = (status?.next_interval != null && lastPoll)
+    ? Math.max(0, status.next_interval - (Date.now() - lastPoll) / 1000)
+    : null;
+  const pollImminent = !pollerPaused && secsToNext !== null && secsToNext < 60;
 
   return (
     <div className="status-bar">
@@ -73,7 +88,7 @@ export default function StatusBar({
         </button>
       )}
 
-      <div className={`status-dot ${isStale || pollerPaused ? 'stale' : quietMode && !wakeOverride ? 'quiet' : 'live'}`} />
+      <div className={`status-dot ${pollImminent ? 'imminent' : isStale || pollerPaused ? 'stale' : quietMode && !wakeOverride ? 'quiet' : 'live'}`} />
 
       <span className="status-text">
         {pollerPaused ? (
@@ -94,8 +109,18 @@ export default function StatusBar({
         {status?.est_credits_cycle != null && !pollerPaused && (
           <> · ~<strong>{status.est_credits_cycle}</strong> credits/cycle</>
         )}
-        {status?.next_interval != null && !pollerPaused && (
-          <> · next poll in <strong>{Math.round(status.next_interval / 60)}m</strong></>
+        {secsToNext !== null && !pollerPaused && (() => {
+          const minsRemaining = Math.round(secsToNext / 60);
+          return (
+            <> · next poll in{' '}
+              <strong className={pollImminent ? 'poll-imminent-text' : ''}>
+                {minsRemaining > 0 ? `${minsRemaining}m` : '<1m'}
+              </strong>
+            </>
+          );
+        })()}
+        {propsLastPoll && !pollerPaused && (
+          <> · props <strong>{timeSince(propsLastPoll)}</strong></>
         )}
       </span>
 
@@ -106,6 +131,15 @@ export default function StatusBar({
       )}
 
       <CreditsWidget credits={credits} />
+
+      <button
+        className={`force-sync-btn ${forceSyncing ? 'syncing' : ''}`}
+        onClick={onForceSync}
+        disabled={forceSyncing}
+        title="Force a full poll now — costs API credits"
+      >
+        {forceSyncing ? '⟳ Syncing…' : '⚡ Force Sync'}
+      </button>
 
       <button className="refresh-btn" onClick={onRefresh} title="Refresh now">⟳</button>
     </div>

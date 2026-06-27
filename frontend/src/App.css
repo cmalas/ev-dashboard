@@ -106,6 +106,15 @@ html, body, #root {
 }
 .status-dot.live  { background: var(--green); box-shadow: 0 0 6px var(--green); }
 .status-dot.stale { background: var(--yellow); }
+.status-dot.imminent { background: var(--yellow); animation: imminent-dot 0.7s ease-in-out infinite; }
+@keyframes imminent-dot {
+  0%, 100% { box-shadow: 0 0 4px var(--yellow); opacity: 1; }
+  50%       { box-shadow: 0 0 12px var(--yellow); opacity: 0.5; }
+}
+.poll-imminent-text {
+  color: var(--yellow) !important;
+  animation: imminent-dot 0.7s ease-in-out infinite;
+}
 
 .status-text strong { color: var(--text); }
 
@@ -162,6 +171,30 @@ html, body, #root {
   transition: color 0.15s, border-color 0.15s;
 }
 .refresh-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ── Force Sync Button ─────────────────────────────────────── */
+.force-sync-btn {
+  background: transparent;
+  border: 1px solid var(--yellow);
+  border-radius: var(--radius);
+  color: var(--yellow);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 9px;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.force-sync-btn:hover:not(:disabled) {
+  background: var(--yellow);
+  color: var(--bg);
+}
+.force-sync-btn.syncing {
+  opacity: 0.6;
+  cursor: default;
+  animation: imminent-dot 0.7s ease-in-out infinite;
+}
+.force-sync-btn:disabled { cursor: default; }
 
 /* ── Poller Toggle Button ──────────────────────────────────── */
 .poller-toggle-btn {

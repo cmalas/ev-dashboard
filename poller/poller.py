@@ -56,6 +56,7 @@ REDIS_HOST        = os.getenv("REDIS_HOST", "redis")
 # Redis keys
 POLLER_PAUSE_KEY         = "poller:paused"
 POLLER_WAKE_OVERRIDE_KEY = "poller:wake_override"
+POLLER_FORCE_SYNC_KEY    = "poller:force_sync"
 ODDS_API_CREDITS_KEY     = "odds_api:credits"
 
 ODDS_API_QUOTA = int(os.getenv("ODDS_API_QUOTA", 20000))
@@ -112,7 +113,7 @@ PROPS_SPORTS = {
 }
 
 PROPS_HOURS_AHEAD    = int(os.getenv("PROPS_HOURS_AHEAD", 24))
-PROPS_CYCLE_INTERVAL = int(os.getenv("PROPS_CYCLE_INTERVAL", 6))
+PROPS_CYCLE_INTERVAL = int(os.getenv("PROPS_CYCLE_INTERVAL", 2))
 PROPS_REGIONS        = "us,us2"
 
 PROP_MARKET_LABELS = {
@@ -763,8 +764,22 @@ def poll_once(rds, cycle_number: int):
                     if not event_data:
                         continue
                     game_id = upsert_game(cur, ev, sport_key)
+                    # Clear stale prop EV rows for this game so lines that
+                    # dropped below MIN_EV_PERCENT don't linger in the table.
+                    prop_market_keys = list(PROPS_SPORTS[sport_key])
+                    cur.execute(
+                        "DELETE FROM ev_results WHERE game_id = %s AND market_type = ANY(%s)",
+                        (game_id, prop_market_keys),
+                    )
                     compute_ev_for_props(cur, game_id, event_data, sport_key)
                     props_processed += 1
+
+            if props_processed > 0 and rds:
+                rds.set(
+                    "poll:props_last_poll",
+                    datetime.now(timezone.utc).isoformat(),
+                    ex=86400,
+                )
 
         # Prune ev_results older than 30 days to prevent unbounded table growth
         cur.execute(
@@ -841,6 +856,12 @@ def main():
             rds.delete(POLLER_WAKE_OVERRIDE_KEY)
             log.info("Quiet hours ended -- wake override cleared")
 
+        # Force sync: align cycle_number so props always run this cycle
+        forced = rds.getdel(POLLER_FORCE_SYNC_KEY) == "1"
+        if forced:
+            log.info("Force sync requested -- including props this cycle")
+            cycle_number = 0  # 0 % PROPS_CYCLE_INTERVAL == 0, so props will run
+
         try:
             poll_once(rds, cycle_number)
             cycle_number += 1
@@ -849,7 +870,14 @@ def main():
             cycle_number += 1
 
         log.info(f"Sleeping {interval}s until next poll...")
-        time.sleep(interval)
+        # Check for force sync every 5s during the sleep window
+        elapsed = 0
+        while elapsed < interval:
+            time.sleep(5)
+            elapsed += 5
+            if rds.get(POLLER_FORCE_SYNC_KEY) == "1":
+                log.info("Force sync signal received -- waking early")
+                break
 
 
 if __name__ == "__main__":

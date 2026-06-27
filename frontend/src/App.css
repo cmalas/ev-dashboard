@@ -389,6 +389,20 @@ html, body, #root {
 
 .time-cell  { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
 .book-cell  { font-weight: 500; }
+.book-link {
+  color: inherit;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.book-link:hover { color: var(--accent); }
+.book-link-icon {
+  font-size: 10px;
+  opacity: 0.45;
+  transition: opacity 0.15s;
+}
+.book-link:hover .book-link-icon { opacity: 1; }
 .outcome-cell { font-weight: 500; }
 
 .market-pill {

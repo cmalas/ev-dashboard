@@ -1,5 +1,87 @@
 import React, { useState } from 'react';
 
+// Sport/league-level deep links per book. Best-effort — gets you to the right
+// sport page but can't pre-fill the bet slip without internal sportsbook IDs.
+const BOOK_SPORT_URLS = {
+  draftkings: {
+    americanfootball_nfl:   'https://sportsbook.draftkings.com/leagues/football/nfl',
+    americanfootball_ncaaf: 'https://sportsbook.draftkings.com/leagues/football/ncaaf',
+    basketball_nba:         'https://sportsbook.draftkings.com/leagues/basketball/nba',
+    baseball_mlb:           'https://sportsbook.draftkings.com/leagues/baseball/mlb',
+    icehockey_nhl:          'https://sportsbook.draftkings.com/leagues/hockey/nhl',
+  },
+  fanduel: {
+    americanfootball_nfl:   'https://sportsbook.fanduel.com/navigation/nfl',
+    americanfootball_ncaaf: 'https://sportsbook.fanduel.com/navigation/college-football',
+    basketball_nba:         'https://sportsbook.fanduel.com/navigation/nba',
+    baseball_mlb:           'https://sportsbook.fanduel.com/navigation/mlb',
+    icehockey_nhl:          'https://sportsbook.fanduel.com/navigation/nhl',
+  },
+  betmgm: {
+    americanfootball_nfl:   'https://sports.betmgm.com/en/sports/football-11',
+    americanfootball_ncaaf: 'https://sports.betmgm.com/en/sports/football-11',
+    basketball_nba:         'https://sports.betmgm.com/en/sports/basketball-7',
+    baseball_mlb:           'https://sports.betmgm.com/en/sports/baseball-23',
+    icehockey_nhl:          'https://sports.betmgm.com/en/sports/ice-hockey-24',
+  },
+  caesars: {
+    // Missouri-specific state path
+    americanfootball_nfl:   'https://sportsbook.caesars.com/us/mo/sports/football/nfl/matches/',
+    americanfootball_ncaaf: 'https://sportsbook.caesars.com/us/mo/sports/football/ncaa-football/matches/',
+    basketball_nba:         'https://sportsbook.caesars.com/us/mo/sports/basketball/nba/matches/',
+    baseball_mlb:           'https://sportsbook.caesars.com/us/mo/sports/baseball/mlb/matches/',
+    icehockey_nhl:          'https://sportsbook.caesars.com/us/mo/sports/ice-hockey/nhl/matches/',
+  },
+  espnbet: {
+    americanfootball_nfl:   'https://espnbet.com/sport/football/organization/us/competition/nfl',
+    americanfootball_ncaaf: 'https://espnbet.com/sport/football/organization/us/competition/ncaa-fb',
+    basketball_nba:         'https://espnbet.com/sport/basketball/organization/us/competition/nba',
+    baseball_mlb:           'https://espnbet.com/sport/baseball/organization/us/competition/mlb',
+    icehockey_nhl:          'https://espnbet.com/sport/hockey/organization/us/competition/nhl',
+  },
+  fanatics: {
+    americanfootball_nfl:   'https://sportsbook.fanatics.com/leagues/nfl',
+    americanfootball_ncaaf: 'https://sportsbook.fanatics.com/leagues/ncaaf',
+    basketball_nba:         'https://sportsbook.fanatics.com/leagues/nba',
+    baseball_mlb:           'https://sportsbook.fanatics.com/leagues/mlb',
+    icehockey_nhl:          'https://sportsbook.fanatics.com/leagues/nhl',
+  },
+  betrivers: {
+    // Missouri subdomain; sport-specific query params are complex so land on sportsbook home
+    americanfootball_nfl:   'https://mo.betrivers.com/?page=sportsbook',
+    americanfootball_ncaaf: 'https://mo.betrivers.com/?page=sportsbook',
+    basketball_nba:         'https://mo.betrivers.com/?page=sportsbook',
+    baseball_mlb:           'https://mo.betrivers.com/?page=sportsbook',
+    icehockey_nhl:          'https://mo.betrivers.com/?page=sportsbook',
+  },
+  bet365: {
+    americanfootball_nfl:   'https://www.bet365.com/en/sports/football/',
+    americanfootball_ncaaf: 'https://www.bet365.com/en/sports/football/',
+    basketball_nba:         'https://www.bet365.com/en/sports/basketball/',
+    baseball_mlb:           'https://www.bet365.com/en/sports/baseball/',
+    icehockey_nhl:          'https://www.bet365.com/en/sports/ice-hockey/',
+  },
+  betonline_ag: {
+    americanfootball_nfl:   'https://www.betonline.ag/sportsbook/football/nfl',
+    americanfootball_ncaaf: 'https://www.betonline.ag/sportsbook/football/college-football',
+    basketball_nba:         'https://www.betonline.ag/sportsbook/basketball/nba',
+    baseball_mlb:           'https://www.betonline.ag/sportsbook/baseball/mlb',
+    icehockey_nhl:          'https://www.betonline.ag/sportsbook/hockey/nhl',
+  },
+  betonlineag: {
+    // Alias — Odds API returns this key without underscore
+    americanfootball_nfl:   'https://www.betonline.ag/sportsbook/football/nfl',
+    americanfootball_ncaaf: 'https://www.betonline.ag/sportsbook/football/college-football',
+    basketball_nba:         'https://www.betonline.ag/sportsbook/basketball/nba',
+    baseball_mlb:           'https://www.betonline.ag/sportsbook/baseball/mlb',
+    icehockey_nhl:          'https://www.betonline.ag/sportsbook/hockey/nhl',
+  },
+};
+
+function getBookSportUrl(bookKey, sportKey) {
+  return BOOK_SPORT_URLS[bookKey]?.[sportKey] ?? null;
+}
+
 const MARKET_COLORS = {
   h2h:                      '#3b82f6',
   spreads:                  '#8b5cf6',
@@ -224,7 +306,24 @@ export default function EVTable({ rows, loading, placedBets = [], onPlaceBet, on
                   </span>
                 </td>
                 <td className="outcome-cell">{formatOutcome(row)}</td>
-                <td className="book-cell">{row.book_label}</td>
+                <td className="book-cell">
+                  {(() => {
+                    const url = getBookSportUrl(row.book, row.sport_key);
+                    return url ? (
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="book-link"
+                        title={`Open ${row.book_label} — ${row.sport_label}`}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        {row.book_label}
+                        <span className="book-link-icon">↗</span>
+                      </a>
+                    ) : row.book_label;
+                  })()}
+                </td>
                 <td className="price-cell mono">{row.book_price_fmt}</td>
                 <td className="fair-cell mono muted">{row.fair_price_fmt}</td>
                 <td className="ev-cell">

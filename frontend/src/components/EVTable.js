@@ -82,6 +82,21 @@ function getBookSportUrl(bookKey, sportKey) {
   return BOOK_SPORT_URLS[bookKey]?.[sportKey] ?? null;
 }
 
+const KELLY_BANKROLL  = 1500;
+const KELLY_FRACTION  = 0.25;
+
+function kellyBet(bookPrice, evPercent) {
+  // American odds → decimal
+  const dec = bookPrice > 0 ? (bookPrice / 100) + 1 : (100 / Math.abs(bookPrice)) + 1;
+  const b   = dec - 1;                                   // net profit per unit
+  // Back out true win prob from EV%: EV = (p × b - q) × 100 → p = (EV/100 + 1) / (b + 1)
+  const p   = (evPercent / 100 + 1) / (b + 1);
+  const q   = 1 - p;
+  const f   = (b * p - q) / b;                          // full Kelly fraction
+  const bet = Math.max(0, f * KELLY_FRACTION * KELLY_BANKROLL);
+  return Math.round(bet);
+}
+
 const MARKET_COLORS = {
   h2h:                      '#3b82f6',
   spreads:                  '#8b5cf6',
@@ -248,6 +263,7 @@ export default function EVTable({ rows, loading, placedBets = [], onPlaceBet, on
             <ColHead label="Price"  sortId="price"  />
             <th>Fair</th>
             <ColHead label="Edge"   sortId="ev"     />
+            <th title="Quarter-Kelly bet size on a $1,500 bankroll">Kelly</th>
           </tr>
         </thead>
         <tbody>
@@ -328,6 +344,9 @@ export default function EVTable({ rows, loading, placedBets = [], onPlaceBet, on
                 <td className="fair-cell mono muted">{row.fair_price_fmt}</td>
                 <td className="ev-cell">
                   <EVBar ev={row.ev_percent} />
+                </td>
+                <td className="kelly-cell mono">
+                  ${kellyBet(row.book_price, row.ev_percent)}
                 </td>
               </tr>
             );

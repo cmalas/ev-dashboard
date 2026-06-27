@@ -388,7 +388,8 @@ html, body, #root {
 .home-team { color: var(--text-muted); }
 
 .time-cell  { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
-.book-cell  { font-weight: 500; }
+.book-cell   { font-weight: 500; }
+.kelly-cell  { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
 .book-link {
   color: inherit;
   text-decoration: none;

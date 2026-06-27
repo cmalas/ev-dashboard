@@ -21,6 +21,7 @@ function App() {
   const [wakeToggling,   setWakeToggling]   = useState(false);
 
   const [placedBets, setPlacedBets] = useState([]);
+  const [credits, setCredits]       = useState(null);
 
   const [filters, setFilters] = useState({
     sport:      '',
@@ -79,6 +80,14 @@ function App() {
       setStatus(data);
       if (data.paused       !== undefined) setPollerPaused(data.paused);
       if (data.wake_override !== undefined) setWakeOverride(data.wake_override);
+    } catch (_) {}
+  }, []);
+
+  const fetchCredits = useCallback(async () => {
+    try {
+      const r    = await fetch(`${API}/credits`);
+      const data = await r.json();
+      if (data.available) setCredits(data);
     } catch (_) {}
   }, []);
 
@@ -156,12 +165,12 @@ function App() {
     }
   }, []);
 
-  useEffect(() => { fetchMeta(); fetchStatus(); fetchBets(); }, [fetchMeta, fetchStatus, fetchBets]);
+  useEffect(() => { fetchMeta(); fetchStatus(); fetchBets(); fetchCredits(); }, [fetchMeta, fetchStatus, fetchBets, fetchCredits]);
   useEffect(() => { fetchEV(); },                  [fetchEV]);
   useEffect(() => {
-    const id = setInterval(() => { fetchEV(); fetchStatus(); }, 120_000);
+    const id = setInterval(() => { fetchEV(); fetchStatus(); fetchCredits(); }, 120_000);
     return () => clearInterval(id);
-  }, [fetchEV, fetchStatus]);
+  }, [fetchEV, fetchStatus, fetchCredits]);
 
   const propsCount    = evData.filter(r => r.is_prop).length;
   // Negative odds (favorites) are never longshots — only cap positive odds
@@ -183,7 +192,7 @@ function App() {
           <StatusBar
             status={status}
             lastRefresh={lastRefresh}
-            onRefresh={() => { fetchEV(); fetchStatus(); }}
+            onRefresh={() => { fetchEV(); fetchStatus(); fetchCredits(); }}
             pollerPaused={pollerPaused}
             onTogglePoller={handleTogglePoller}
             pollerToggling={pollerToggling}
@@ -191,6 +200,7 @@ function App() {
             onWake={handleWake}
             onSleep={handleSleep}
             wakeToggling={wakeToggling}
+            credits={credits}
           />
         </div>
       </header>

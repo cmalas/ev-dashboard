@@ -391,6 +391,17 @@ def remove_bet(bet_id: int):
     return {"deleted": row["id"]}
 
 
+@app.get("/api/credits")
+def get_credits():
+    """Returns latest Odds API credit usage from Redis (written by the poller)."""
+    rds = get_redis()
+    raw = rds.get("odds_api:credits")
+    if not raw:
+        return {"available": False}
+    data = json.loads(raw)
+    return {"available": True, **data}
+
+
 @app.get("/api/books")
 def get_books():
     db  = get_db()

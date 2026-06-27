@@ -53,6 +53,9 @@ REDIS_HOST        = os.getenv("REDIS_HOST", "redis")
 # Redis keys
 POLLER_PAUSE_KEY         = "poller:paused"
 POLLER_WAKE_OVERRIDE_KEY = "poller:wake_override"
+ODDS_API_CREDITS_KEY     = "odds_api:credits"
+
+ODDS_API_QUOTA = int(os.getenv("ODDS_API_QUOTA", 20000))
 
 # Quiet hours — America/Chicago time (24h integers)
 # During this window, poll interval stretches to QUIET_POLL_INTERVAL.
@@ -220,7 +223,24 @@ def fetch_events_free(sport_key: str) -> list[dict]:
         return []
 
 
-def fetch_odds(sport_key: str) -> list[dict]:
+def _persist_credits(rds, headers: dict) -> None:
+    """Write latest credit stats from response headers into Redis."""
+    remaining = headers.get("x-requests-remaining")
+    used      = headers.get("x-requests-used")
+    last_cost = headers.get("x-requests-last")
+    if remaining is None and used is None:
+        return
+    payload = {
+        "remaining":  int(remaining) if remaining is not None else None,
+        "used":       int(used)      if used      is not None else None,
+        "last_cost":  int(last_cost) if last_cost is not None else None,
+        "quota":      ODDS_API_QUOTA,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    rds.set(ODDS_API_CREDITS_KEY, json.dumps(payload))
+
+
+def fetch_odds(sport_key: str, rds=None) -> list[dict]:
     """Fetch mainline odds. Costs 3 credits per sport."""
     url = f"{ODDS_API_BASE}/sports/{sport_key}/odds"
     params = {
@@ -235,6 +255,8 @@ def fetch_odds(sport_key: str) -> list[dict]:
     used       = resp.headers.get("x-requests-used", "?")
     cost       = resp.headers.get("x-requests-last", "?")
     log.info(f"  [{sport_key}] credits -- cost: {cost}, used: {used}, remaining: {remaining}")
+    if rds:
+        _persist_credits(rds, resp.headers)
 
     if resp.status_code == 401:
         log.error("Invalid API key -- check ODDS_API_KEY in .env")
@@ -249,7 +271,7 @@ def fetch_odds(sport_key: str) -> list[dict]:
     return resp.json()
 
 
-def fetch_event_props(sport_key: str, event_id: str, markets: list[str]) -> dict | None:
+def fetch_event_props(sport_key: str, event_id: str, markets: list[str], rds=None) -> dict | None:
     """Fetch player prop odds for a single event. Costs ~2-7 credits."""
     url = f"{ODDS_API_BASE}/sports/{sport_key}/events/{event_id}/odds"
     params = {
@@ -263,6 +285,8 @@ def fetch_event_props(sport_key: str, event_id: str, markets: list[str]) -> dict
     remaining = resp.headers.get("x-requests-remaining", "?")
     cost       = resp.headers.get("x-requests-last", "?")
     log.info(f"    [props/{event_id[:8]}] credits -- cost: {cost}, remaining: {remaining}")
+    if rds:
+        _persist_credits(rds, resp.headers)
 
     if resp.status_code in (401, 422, 404):
         return None
@@ -629,7 +653,7 @@ def poll_once(rds, cycle_number: int):
 
             log.info(f"  [{sport_key}] {event_count} upcoming events -- fetching odds...")
             try:
-                events = fetch_odds(sport_key)
+                events = fetch_odds(sport_key, rds=rds)
             except requests.HTTPError as e:
                 log.error(f"  HTTP error for {sport_key}: {e}")
                 continue
@@ -675,7 +699,7 @@ def poll_once(rds, cycle_number: int):
                 )
                 for ev in upcoming:
                     try:
-                        event_data = fetch_event_props(sport_key, ev["id"], prop_markets)
+                        event_data = fetch_event_props(sport_key, ev["id"], prop_markets, rds=rds)
                     except Exception as e:
                         log.error(f"    Props fetch failed for {ev['id'][:8]}: {e}")
                         continue

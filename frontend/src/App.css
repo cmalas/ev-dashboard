@@ -109,6 +109,39 @@ html, body, #root {
 
 .status-text strong { color: var(--text); }
 
+.credits-widget {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.credits-label {
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.credits-bar-track {
+  width: 60px;
+  height: 5px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.credits-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.credits-count {
+  font-family: var(--font-data);
+  white-space: nowrap;
+  color: var(--text);
+}
+.credits-denom {
+  color: var(--text-muted);
+}
+
 .refresh-btn {
   background: var(--bg-raised);
   border: 1px solid var(--border);

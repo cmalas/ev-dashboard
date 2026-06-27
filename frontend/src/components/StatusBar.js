@@ -8,10 +8,38 @@ function timeSince(iso) {
   return `${Math.floor(secs / 3600)}h ago`;
 }
 
+function CreditsWidget({ credits }) {
+  if (!credits) return null;
+  const { remaining, used, quota, last_cost, updated_at } = credits;
+  const pctUsed = quota ? Math.min(100, Math.round((used / quota) * 100)) : null;
+  const pctLeft = 100 - pctUsed;
+  const barColor = pctUsed >= 90 ? 'var(--red)' : pctUsed >= 70 ? 'var(--yellow)' : 'var(--green)';
+
+  const updatedAgo = updated_at ? (() => {
+    const secs = Math.floor((Date.now() - new Date(updated_at)) / 1000);
+    if (secs < 60) return `${secs}s ago`;
+    if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+    return `${Math.floor(secs / 3600)}h ago`;
+  })() : null;
+
+  return (
+    <div className="credits-widget" title={`Updated ${updatedAgo ?? '—'} · Last call: ${last_cost ?? '?'} credit${last_cost !== 1 ? 's' : ''}`}>
+      <span className="credits-label">API</span>
+      <div className="credits-bar-track">
+        <div className="credits-bar-fill" style={{ width: `${pctLeft}%`, background: barColor }} />
+      </div>
+      <span className="credits-count">
+        {remaining?.toLocaleString() ?? '?'}<span className="credits-denom">/{quota?.toLocaleString()}</span>
+      </span>
+    </div>
+  );
+}
+
 export default function StatusBar({
   status, lastRefresh, onRefresh,
   pollerPaused, onTogglePoller, pollerToggling,
   wakeOverride, onWake, onSleep, wakeToggling,
+  credits,
 }) {
   const lastPoll  = status?.last_poll ? new Date(status.last_poll) : null;
   const minsAgo   = lastPoll ? Math.floor((Date.now() - lastPoll) / 60000) : null;
@@ -73,6 +101,8 @@ export default function StatusBar({
           · UI refreshed {timeSince(lastRefresh.toISOString())}
         </span>
       )}
+
+      <CreditsWidget credits={credits} />
 
       <button className="refresh-btn" onClick={onRefresh} title="Refresh now">⟳</button>
     </div>

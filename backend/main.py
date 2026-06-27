@@ -83,7 +83,7 @@ BOOK_LABELS = {
     "fanduel":      "FanDuel",
     "betmgm":       "BetMGM",
     "caesars":      "Caesars",
-    "espnbet":      "ESPN Bet",
+    "espnbet":      "theScore",
     "bet365":       "Bet365",
     "fanatics":     "Fanatics",
     "betrivers":    "BetRivers",

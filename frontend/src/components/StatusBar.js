@@ -94,6 +94,9 @@ export default function StatusBar({
         {status?.est_credits_cycle != null && !pollerPaused && (
           <> · ~<strong>{status.est_credits_cycle}</strong> credits/cycle</>
         )}
+        {status?.next_interval != null && !pollerPaused && (
+          <> · next poll in <strong>{Math.round(status.next_interval / 60)}m</strong></>
+        )}
       </span>
 
       {lastRefresh && (

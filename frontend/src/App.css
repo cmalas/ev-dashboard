@@ -112,18 +112,23 @@ html, body, #root {
 .credits-widget {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--text-muted);
+  gap: 7px;
+  font-size: 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
 }
 .credits-label {
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  color: #94a3b8;
+  text-transform: uppercase;
 }
 .credits-bar-track {
-  width: 60px;
-  height: 5px;
+  width: 64px;
+  height: 6px;
   background: var(--border);
   border-radius: 3px;
   overflow: hidden;
@@ -136,10 +141,13 @@ html, body, #root {
 .credits-count {
   font-family: var(--font-data);
   white-space: nowrap;
-  color: var(--text);
+  color: #f1f5f9;
+  font-size: 13px;
+  font-weight: 600;
 }
 .credits-denom {
-  color: var(--text-muted);
+  color: #94a3b8;
+  font-weight: 400;
 }
 
 .refresh-btn {
@@ -389,7 +397,7 @@ html, body, #root {
 
 .time-cell  { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
 .book-cell   { font-weight: 500; }
-.kelly-cell  { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
+.kelly-cell  { color: #4ade80; font-size: 15px; font-weight: 600; white-space: nowrap; }
 .book-link {
   color: inherit;
   text-decoration: none;
@@ -555,6 +563,45 @@ html, body, #root {
   border: 1px solid rgba(234, 179, 8, 0.35);
 }
 
+/* ── Conflict badge popover ───────────────────────────────── */
+.conflict-badge-wrap {
+  position: static;
+  display: inline-block;
+}
+.conflict-popover {
+  display: none;
+  position: fixed;
+  z-index: 9999;
+  background: #0f1117;
+  border: 1.5px solid #f97316;
+  border-radius: 7px;
+  padding: 9px 12px;
+  width: 240px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.7);
+  pointer-events: none;
+  text-align: left;
+  white-space: normal;
+}
+.conflict-badge-wrap:hover .conflict-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.conflict-popover-header {
+  font-size: 10px;
+  font-weight: 700;
+  color: #f97316;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.conflict-popover-detail {
+  font-size: 13px;
+  color: #ffffff;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  line-height: 1.4;
+}
+
 /* ── Bet placement: action button ─────────────────────────── */
 .action-col {
   width: 52px;
@@ -595,7 +642,9 @@ html, body, #root {
 .bet-btn-placed:hover {
   background: rgba(239, 68, 68, 0.2);
 }
-.action-col > .bet-badge {
+.action-col > .bet-badge,
+.action-col .conflict-badge-wrap {
   display: block;
   margin-bottom: 4px;
+  overflow: visible;
 }

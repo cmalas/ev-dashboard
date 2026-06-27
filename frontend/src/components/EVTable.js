@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 
 // Sport/league-level deep links per book. Best-effort — gets you to the right
 // sport page but can't pre-fill the bet slip without internal sportsbook IDs.
@@ -87,18 +87,34 @@ const MARKET_COLORS = {
   pitcher_hits_allowed:     '#10b981',
 };
 
+// For prop markets, extract the player name by stripping the Over/Under direction prefix.
+// "Over Kody Clemens" → "Kody Clemens", "Under Hunter Goodman" → "Hunter Goodman"
+function propPlayer(outcomeName) {
+  return (outcomeName || '').replace(/^(Over|Under)\s+/i, '').trim();
+}
+
+const PROP_MARKET_PREFIXES = ['batter_', 'pitcher_'];
+function isPropMarket(marketType) {
+  return PROP_MARKET_PREFIXES.some(p => (marketType || '').startsWith(p));
+}
+
 // Returns the highest-severity conflict status for a row against the placed bets list.
 // 'exact'       — same game + market + outcome + book (red)
 // 'conflicting' — same game + market, different outcome (orange)
+//                 For prop markets: only if same player, opposite direction.
 // 'same_outcome'— same game + market + outcome, different book (yellow)
 // null          — no conflict
 function getBetStatus(row, placedBets) {
   let status = null;
   let matchedBet = null;
+  const isprop = isPropMarket(row.market_type);
 
   for (const bet of placedBets) {
     if (bet.game_external_id !== row.game_external_id) continue;
     if (bet.market_type !== row.market_type) continue;
+
+    // For props, ignore bets on different players entirely.
+    if (isprop && propPlayer(bet.outcome_name) !== propPlayer(row.outcome_name)) continue;
 
     const sameOutcome =
       bet.outcome_name === row.outcome_name &&
@@ -120,6 +136,33 @@ function getBetStatus(row, placedBets) {
   return status ? { status, bet: matchedBet } : null;
 }
 
+const BOOK_DISPLAY = {
+  draftkings:   'DraftKings',
+  fanduel:      'FanDuel',
+  betmgm:       'BetMGM',
+  caesars:      'Caesars',
+  espnbet:      'theScore',
+  bet365:       'Bet365',
+  fanatics:     'Fanatics',
+  betrivers:    'BetRivers',
+  pinnacle:     'Pinnacle',
+  circa:        'Circa',
+  betonline_ag: 'BetOnline',
+  consensus:    'Consensus',
+};
+
+// Human-readable description of the conflicting/caution bet for tooltip display.
+function describeConflictBet(bet) {
+  if (!bet) return '';
+  let outcome = bet.outcome_name || '';
+  if (bet.point != null) outcome += ` (${bet.point})`;
+  const bookName = BOOK_DISPLAY[bet.book] || bet.book;
+  const price = bet.book_price != null
+    ? (bet.book_price > 0 ? `+${bet.book_price}` : String(bet.book_price))
+    : null;
+  return [outcome, `on ${bookName}`, price ? `at ${price}` : null].filter(Boolean).join(' ');
+}
+
 // Find the placed bet that is an exact match for a row (used to get bet id for removal)
 function getExactBet(row, placedBets) {
   return placedBets.find(
@@ -129,6 +172,31 @@ function getExactBet(row, placedBets) {
       bet.outcome_name === row.outcome_name &&
       bet.book === row.book &&
       (bet.point == null ? row.point == null : Number(bet.point) === row.point)
+  );
+}
+
+function ConflictBadge({ cfg, bet }) {
+  const [pos, setPos] = useState(null);
+  const wrapRef = useRef(null);
+
+  const handleMouseEnter = useCallback(() => {
+    if (!wrapRef.current) return;
+    const r = wrapRef.current.getBoundingClientRect();
+    setPos({ top: r.bottom + 6, left: r.left });
+  }, []);
+
+  const handleMouseLeave = useCallback(() => setPos(null), []);
+
+  return (
+    <span ref={wrapRef} className="conflict-badge-wrap" onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>
+      <span className={cfg.badgeClass}>{cfg.label}</span>
+      {pos && bet && (
+        <span className="conflict-popover" style={{ top: pos.top, left: pos.left }}>
+          <span className="conflict-popover-header">{cfg.title}</span>
+          <span className="conflict-popover-detail">{describeConflictBet(bet)}</span>
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -240,7 +308,7 @@ export default function EVTable({ rows, loading, placedBets = [], onPlaceBet, on
             <ColHead label="Price"  sortId="price"  />
             <th>Fair</th>
             <ColHead label="Edge"   sortId="ev"     />
-            <th title="Quarter-Kelly bet size on a $1,500 bankroll">Kelly</th>
+            <th title="Quarter-Kelly bet size on a $1,500 bankroll">Bet Size</th>
           </tr>
         </thead>
         <tbody>
@@ -263,12 +331,7 @@ export default function EVTable({ rows, loading, placedBets = [], onPlaceBet, on
               >
                 <td className="action-col">
                   {cfg && (
-                    <span
-                      className={cfg.badgeClass}
-                      title={cfg.title}
-                    >
-                      {cfg.label}
-                    </span>
+                    <ConflictBadge cfg={cfg} bet={betStatus?.bet} />
                   )}
                   <button
                     className={`bet-btn ${isPlaced ? 'bet-btn-placed' : 'bet-btn-idle'}`}

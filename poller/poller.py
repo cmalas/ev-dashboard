@@ -41,7 +41,9 @@ log = logging.getLogger(__name__)
 
 ODDS_API_KEY      = os.environ["ODDS_API_KEY"]
 ODDS_API_BASE     = "https://api.the-odds-api.com/v4"
-POLL_INTERVAL     = int(os.getenv("POLL_INTERVAL_SECONDS", 1800))
+POLL_INTERVAL     = int(os.getenv("POLL_INTERVAL_SECONDS", 1800))  # fallback only
+MIN_POLL_INTERVAL = int(os.getenv("MIN_POLL_INTERVAL_SECONDS", 600))   # 10 min floor
+MAX_POLL_INTERVAL = int(os.getenv("MAX_POLL_INTERVAL_SECONDS", 3600))  # 60 min ceiling
 
 PG_HOST           = os.getenv("POSTGRES_HOST", "postgres")
 PG_DB             = os.getenv("POSTGRES_DB", "evdashboard")
@@ -157,6 +159,56 @@ def seconds_until_quiet_ends() -> int:
     return max(int((end - now).total_seconds()), 60)
 
 
+def seconds_until_next_reset() -> int:
+    """Seconds until the next 1st-of-month at 00:00 UTC (Odds API credit reset)."""
+    now = datetime.now(timezone.utc)
+    if now.month == 12:
+        next_reset = datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        next_reset = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
+    return max(int((next_reset - now).total_seconds()), 1)
+
+
+def calc_dynamic_interval(rds) -> int:
+    """
+    Compute the optimal poll interval to spend remaining credits evenly across
+    the time left until the next Odds API reset (1st of month, 00:00 UTC).
+
+    Falls back to POLL_INTERVAL if credit data is unavailable.
+    Always clamped to [MIN_POLL_INTERVAL, MAX_POLL_INTERVAL].
+    """
+    try:
+        raw = rds.get(ODDS_API_CREDITS_KEY)
+        summary_raw = rds.get("poll:last_summary")
+        if not raw or not summary_raw:
+            return POLL_INTERVAL
+
+        credits = json.loads(raw)
+        summary = json.loads(summary_raw)
+        remaining = credits.get("remaining")
+        credits_per_cycle = summary.get("est_credits_cycle")
+
+        if not remaining or not credits_per_cycle or credits_per_cycle <= 0:
+            return POLL_INTERVAL
+
+        secs_left = seconds_until_next_reset()
+        # How many polls can we fit in the remaining time with our budget?
+        max_polls = remaining / credits_per_cycle
+        if max_polls <= 0:
+            return MAX_POLL_INTERVAL
+
+        target = int(secs_left / max_polls)
+        clamped = max(MIN_POLL_INTERVAL, min(MAX_POLL_INTERVAL, target))
+        log.info(
+            f"Dynamic interval: {remaining} credits left, {secs_left/3600:.1f}h until reset, "
+            f"{credits_per_cycle} credits/cycle → target {target}s → clamped to {clamped}s"
+        )
+        return clamped
+    except Exception as e:
+        log.warning(f"Dynamic interval calc failed, falling back: {e}")
+        return POLL_INTERVAL
+
+
 def get_current_interval(rds) -> tuple[int, bool, bool]:
     """
     Determine the correct poll interval for this cycle.
@@ -164,15 +216,15 @@ def get_current_interval(rds) -> tuple[int, bool, bool]:
     Returns (interval_seconds, in_quiet_mode, override_active).
     - If paused: caller handles that separately.
     - If in quiet hours AND no override: use QUIET_POLL_INTERVAL.
-    - If in quiet hours AND override active: use normal POLL_INTERVAL.
-    - Otherwise: use normal POLL_INTERVAL.
+    - If in quiet hours AND override active: dynamic interval.
+    - Otherwise: dynamic interval.
     """
     quiet = is_quiet_hours()
     override = rds.get(POLLER_WAKE_OVERRIDE_KEY) == "1"
 
     if quiet and not override:
         return QUIET_POLL_INTERVAL, True, False
-    return POLL_INTERVAL, quiet, override
+    return calc_dynamic_interval(rds), quiet, override
 
 
 # --- Database ----------------------------------------------------------------
@@ -746,6 +798,7 @@ def poll_once(rds, cycle_number: int):
         "events_processed":  total_events,
         "props_processed":   props_processed,
         "est_credits_cycle": credits_mainlines,
+        "next_interval":     calc_dynamic_interval(rds),
     }
     rds.set("poll:last_summary", json.dumps(summary), ex=3600)
 

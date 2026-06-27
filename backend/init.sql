@@ -61,6 +61,22 @@ CREATE INDEX IF NOT EXISTS idx_ev_game_id ON ev_results(game_id);
 CREATE INDEX IF NOT EXISTS idx_ev_computed_at ON ev_results(computed_at);
 CREATE INDEX IF NOT EXISTS idx_ev_ev_percent ON ev_results(ev_percent DESC);
 
+-- Stores bets the user has marked as placed
+CREATE TABLE IF NOT EXISTS placed_bets (
+    id               SERIAL PRIMARY KEY,
+    game_external_id TEXT NOT NULL,
+    home_team        TEXT NOT NULL,
+    away_team        TEXT NOT NULL,
+    sport_key        TEXT NOT NULL,
+    market_type      TEXT NOT NULL,
+    outcome_name     TEXT NOT NULL,
+    point            NUMERIC,
+    book             TEXT NOT NULL,
+    book_price       NUMERIC,
+    ev_percent       NUMERIC,
+    placed_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Seed sports we care about (mainlines; props-ready for later)
 INSERT INTO sports (key, title, group_name) VALUES
     ('americanfootball_nfl',        'NFL',       'American Football'),

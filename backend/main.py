@@ -11,11 +11,25 @@ from datetime import datetime, timezone
 import psycopg2
 import psycopg2.extras
 import redis as redis_lib
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from typing import Optional
 
 app = FastAPI(title="EV Dashboard API", version="1.0.0")
+
+
+class PlacedBetIn(BaseModel):
+    game_external_id: str
+    home_team: str
+    away_team: str
+    sport_key: str
+    market_type: str
+    outcome_name: str
+    point: Optional[float] = None
+    book: str
+    book_price: Optional[float] = None
+    ev_percent: Optional[float] = None
 
 app.add_middleware(
     CORSMiddleware,
@@ -78,6 +92,31 @@ BOOK_LABELS = {
     "betonline_ag": "BetOnline",
     "consensus":    "Consensus",
 }
+
+
+@app.on_event("startup")
+def create_placed_bets_table():
+    db = get_db()
+    cur = db.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS placed_bets (
+            id               SERIAL PRIMARY KEY,
+            game_external_id TEXT NOT NULL,
+            home_team        TEXT NOT NULL,
+            away_team        TEXT NOT NULL,
+            sport_key        TEXT NOT NULL,
+            market_type      TEXT NOT NULL,
+            outcome_name     TEXT NOT NULL,
+            point            NUMERIC,
+            book             TEXT NOT NULL,
+            book_price       NUMERIC,
+            ev_percent       NUMERIC,
+            placed_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    db.commit()
+    cur.close()
+    db.close()
 
 
 def get_db():
@@ -258,8 +297,9 @@ def get_ev_opportunities(
     for r in rows:
         is_prop = r["market_type"] in PROP_MARKET_KEYS
         results.append({
-            "id":             r["id"],
-            "sport_key":      r["sport_key"],
+            "id":                r["id"],
+            "game_external_id":  r["game_external_id"],
+            "sport_key":         r["sport_key"],
             "sport_label":    SPORT_LABELS.get(r["sport_key"], r["sport_key"]),
             "game": {
                 "home_team":     r["home_team"],
@@ -302,6 +342,53 @@ def get_sports():
     cur.close()
     db.close()
     return {"sports": [dict(r) for r in rows]}
+
+
+@app.get("/api/bets")
+def get_placed_bets():
+    db  = get_db()
+    cur = db.cursor()
+    cur.execute("SELECT * FROM placed_bets ORDER BY placed_at DESC")
+    rows = cur.fetchall()
+    cur.close()
+    db.close()
+    return {"bets": [dict(r) for r in rows]}
+
+
+@app.post("/api/bets")
+def place_bet(bet: PlacedBetIn):
+    db  = get_db()
+    cur = db.cursor()
+    cur.execute("""
+        INSERT INTO placed_bets
+            (game_external_id, home_team, away_team, sport_key,
+             market_type, outcome_name, point, book, book_price, ev_percent)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        RETURNING id, placed_at
+    """, (
+        bet.game_external_id, bet.home_team, bet.away_team, bet.sport_key,
+        bet.market_type, bet.outcome_name, bet.point, bet.book,
+        bet.book_price, bet.ev_percent,
+    ))
+    row = cur.fetchone()
+    db.commit()
+    cur.close()
+    db.close()
+    return {"id": row["id"], "placed_at": row["placed_at"].isoformat()}
+
+
+@app.delete("/api/bets/{bet_id}")
+def remove_bet(bet_id: int):
+    db  = get_db()
+    cur = db.cursor()
+    cur.execute("DELETE FROM placed_bets WHERE id = %s RETURNING id", (bet_id,))
+    row = cur.fetchone()
+    db.commit()
+    cur.close()
+    db.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Bet not found")
+    return {"deleted": row["id"]}
 
 
 @app.get("/api/books")

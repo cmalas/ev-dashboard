@@ -20,6 +20,8 @@ function App() {
   const [wakeOverride,   setWakeOverride]   = useState(false);
   const [wakeToggling,   setWakeToggling]   = useState(false);
 
+  const [placedBets, setPlacedBets] = useState([]);
+
   const [filters, setFilters] = useState({
     sport:      '',
     market:     '',
@@ -28,6 +30,47 @@ function App() {
     hoursAhead: 12,
     maxOdds:    9999,
   });
+
+  const fetchBets = useCallback(async () => {
+    try {
+      const r    = await fetch(`${API}/bets`);
+      const data = await r.json();
+      setPlacedBets(data.bets || []);
+    } catch (_) {}
+  }, []);
+
+  const handlePlaceBet = useCallback(async (row) => {
+    try {
+      await fetch(`${API}/bets`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          game_external_id: row.game_external_id,
+          home_team:        row.game.home_team,
+          away_team:        row.game.away_team,
+          sport_key:        row.sport_key,
+          market_type:      row.market_type,
+          outcome_name:     row.outcome_name,
+          point:            row.point,
+          book:             row.book,
+          book_price:       row.book_price,
+          ev_percent:       row.ev_percent,
+        }),
+      });
+      fetchBets();
+    } catch (e) {
+      console.error('Failed to place bet:', e);
+    }
+  }, [fetchBets]);
+
+  const handleRemoveBet = useCallback(async (betId) => {
+    try {
+      await fetch(`${API}/bets/${betId}`, { method: 'DELETE' });
+      fetchBets();
+    } catch (e) {
+      console.error('Failed to remove bet:', e);
+    }
+  }, [fetchBets]);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -113,7 +156,7 @@ function App() {
     }
   }, []);
 
-  useEffect(() => { fetchMeta(); fetchStatus(); }, [fetchMeta, fetchStatus]);
+  useEffect(() => { fetchMeta(); fetchStatus(); fetchBets(); }, [fetchMeta, fetchStatus, fetchBets]);
   useEffect(() => { fetchEV(); },                  [fetchEV]);
   useEffect(() => {
     const id = setInterval(() => { fetchEV(); fetchStatus(); }, 120_000);
@@ -183,7 +226,13 @@ function App() {
           )}
 
           {!error && filteredData.length > 0 && (
-            <EVTable rows={filteredData} loading={loading} />
+            <EVTable
+              rows={filteredData}
+              loading={loading}
+              placedBets={placedBets}
+              onPlaceBet={handlePlaceBet}
+              onRemoveBet={handleRemoveBet}
+            />
           )}
         </section>
       </main>

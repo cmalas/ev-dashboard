@@ -46,35 +46,12 @@ const BOOK_SPORT_URLS = {
     baseball_mlb:           'https://sportsbook.fanatics.com/leagues/mlb',
     icehockey_nhl:          'https://sportsbook.fanatics.com/leagues/nhl',
   },
-  betrivers: {
-    // Missouri subdomain; sport-specific query params are complex so land on sportsbook home
-    americanfootball_nfl:   'https://mo.betrivers.com/?page=sportsbook',
-    americanfootball_ncaaf: 'https://mo.betrivers.com/?page=sportsbook',
-    basketball_nba:         'https://mo.betrivers.com/?page=sportsbook',
-    baseball_mlb:           'https://mo.betrivers.com/?page=sportsbook',
-    icehockey_nhl:          'https://mo.betrivers.com/?page=sportsbook',
-  },
   bet365: {
     americanfootball_nfl:   'https://www.bet365.com/en/sports/football/',
     americanfootball_ncaaf: 'https://www.bet365.com/en/sports/football/',
     basketball_nba:         'https://www.bet365.com/en/sports/basketball/',
     baseball_mlb:           'https://www.bet365.com/en/sports/baseball/',
     icehockey_nhl:          'https://www.bet365.com/en/sports/ice-hockey/',
-  },
-  betonline_ag: {
-    americanfootball_nfl:   'https://www.betonline.ag/sportsbook/football/nfl',
-    americanfootball_ncaaf: 'https://www.betonline.ag/sportsbook/football/college-football',
-    basketball_nba:         'https://www.betonline.ag/sportsbook/basketball/nba',
-    baseball_mlb:           'https://www.betonline.ag/sportsbook/baseball/mlb',
-    icehockey_nhl:          'https://www.betonline.ag/sportsbook/hockey/nhl',
-  },
-  betonlineag: {
-    // Alias — Odds API returns this key without underscore
-    americanfootball_nfl:   'https://www.betonline.ag/sportsbook/football/nfl',
-    americanfootball_ncaaf: 'https://www.betonline.ag/sportsbook/football/college-football',
-    basketball_nba:         'https://www.betonline.ag/sportsbook/basketball/nba',
-    baseball_mlb:           'https://www.betonline.ag/sportsbook/baseball/mlb',
-    icehockey_nhl:          'https://www.betonline.ag/sportsbook/hockey/nhl',
   },
 };
 

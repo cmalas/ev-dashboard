@@ -70,11 +70,16 @@ SHARP_BOOKS = ["pinnacle", "circa", "betonline_ag"]
 # Soft books to scan for value
 TARGET_BOOKS = [
     "draftkings", "fanduel", "betmgm", "caesars",
-    "espnbet", "fanatics", "betrivers", "bet365",
+    "espnbet", "fanatics", "bet365",
 ]
 
 # Books unavailable in Missouri — exclude from EV results and consensus
-EXCLUDED_BOOKS = {"betparx", "hardrockbet", "hardrockbet_oh", "fliff", "ballybet"}
+# Books excluded from EV results — either unavailable in Missouri or not used for betting.
+# Note: betonline_ag / betonlineag kept in SHARP_BOOKS for sharp line sourcing only.
+EXCLUDED_BOOKS = {
+    "betparx", "hardrockbet", "hardrockbet_oh", "fliff", "ballybet",  # not licensed in MO
+    "betrivers", "betonline_ag", "betonlineag",                        # not licensed in MO
+}
 
 # 10 books = 1 region-equivalent = 3 credits/sport for mainlines
 ALL_BOOKS        = SHARP_BOOKS + TARGET_BOOKS[:7]

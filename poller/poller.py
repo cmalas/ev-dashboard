@@ -23,6 +23,7 @@ import json
 import logging
 import statistics
 import zoneinfo
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -612,7 +613,6 @@ def compute_ev_for_props(cur, game_id: int, event_data: dict, sport_key: str):
                 continue
 
             # Normalise to most common point value if books disagree
-            from collections import Counter
             point_counts = Counter(
                 sides["over"]["point"] for sides in books_with_both.values()
             )

@@ -7,9 +7,9 @@ A self-hosted positive expected value sports betting dashboard. Polls odds from 
 ## Architecture
 
 ```
-┌─────────────┐     every 30 min      ┌──────────────────┐
+┌─────────────┐   dynamic interval    ┌──────────────────┐
 │  The Odds   │ ──────────────────▶   │     Poller       │
-│     API     │                       │   (poller.py)    │
+│     API     │   (10 min – 60 min)   │   (poller.py)    │
 └─────────────┘                       └────────┬─────────┘
                                                │ writes odds + EV results
                                     ┌──────────▼─────────┐
@@ -37,7 +37,7 @@ A self-hosted positive expected value sports betting dashboard. Polls odds from 
 | Container     | Role                                      | Internal Port |
 |---------------|-------------------------------------------|---------------|
 | `ev_postgres` | Stores games, odds snapshots, EV results  | 5432          |
-| `ev_redis`    | Caches last poll summary for status bar   | 6379          |
+| `ev_redis`    | Caches poll summary + credit stats        | 6379          |
 | `ev_poller`   | Fetches odds + computes EV on a schedule  | —             |
 | `ev_backend`  | FastAPI REST API                          | 8000          |
 | `ev_frontend` | React app (built static files)            | 3000          |
@@ -106,44 +106,57 @@ Books included in EV results and consensus:
 | FanDuel    | `fanduel`     |
 | BetMGM     | `betmgm`      |
 | Caesars    | `caesars`     |
-| ESPN Bet   | `espnbet`     |
+| theScore   | `espnbet`     |
 | Fanatics   | `fanatics`    |
-| BetRivers  | `betrivers`   |
 | Bet365     | `bet365`      |
-| BetOnline  | `betonlineag` |
 
-Books excluded via `EXCLUDED_BOOKS` (unavailable in Missouri):
-`betparx`, `hardrockbet`, `hardrockbet_oh`, `fliff`, `ballybet`
+Books used as **sharp sources only** (not shown in results):
+`pinnacle`, `circa`, `betonline_ag`
+
+Books excluded entirely (unavailable in Missouri):
+`betrivers`, `betparx`, `hardrockbet`, `hardrockbet_oh`, `fliff`, `ballybet`
 
 ---
 
 ## Credit Budget (The Odds API)
 
-Plan: **20,000 credits/month**
+Plan: **20,000 credits/month** — resets on the **1st of each month at 00:00 UTC**
+(independent of your billing date).
+
+### Dynamic Polling
+
+The poller automatically adjusts its interval each cycle based on remaining
+credits and days until the next 1st-of-month reset:
+
+```
+target_interval = seconds_until_reset / (remaining_credits / credits_per_cycle)
+```
+
+Clamped between `MIN_POLL_INTERVAL_SECONDS` (default 10 min) and
+`MAX_POLL_INTERVAL_SECONDS` (default 60 min). The current calculated interval
+is shown in the dashboard status bar.
 
 ### Mainlines
-| Factor                 | Value                    |
-|------------------------|--------------------------|
-| Markets per poll       | 3 (h2h, spreads, totals) |
-| Bookmakers             | 10 (1 region-equivalent) |
-| Cost per active sport  | 3 credits                |
-| Typical active sports  | 3 (NBA/NHL off-season)   |
-| Cost per cycle         | ~9 credits               |
-| Poll interval          | 1800s (30 min)           |
-| Monthly mainline spend | ~1,440 × 9 = ~12,960     |
+| Factor                | Value                    |
+|-----------------------|--------------------------|
+| Markets per poll      | 3 (h2h, spreads, totals) |
+| Bookmakers            | 10 (1 region-equivalent) |
+| Cost per active sport | 3 credits                |
+| Active sports (MLB)   | 3 (NBA/NHL off-season)   |
+| Cost per cycle        | ~9 credits               |
+| Active sports (peak)  | 5 (NFL + NBA + MLB etc.) |
+| Cost per cycle (peak) | ~15 credits              |
 
 ### Props
-| Factor                 | Value                   |
-|------------------------|-------------------------|
-| Cost per game          | ~12 credits             |
-| Games per cycle        | ~15 (MLB)               |
-| Cost per props cycle   | ~180 credits            |
-| Props cycle interval   | every 6 mainline cycles |
-| Props cycles/day       | ~4                      |
-| Monthly props spend    | ~4 × 30 × 180 = ~21,600 |
+| Factor               | Value                   |
+|----------------------|-------------------------|
+| Cost per game        | ~12 credits             |
+| Games per cycle      | ~15 (MLB)               |
+| Cost per props cycle | ~180 credits            |
+| Props cycle interval | every 6 mainline cycles |
 
-> ⚠️ Props are credit-heavy. Tune `PROPS_CYCLE_INTERVAL` and `PROPS_HOURS_AHEAD`
-> in `.env` to stay under 20K/month. Recommended: `PROPS_CYCLE_INTERVAL=16`
+> ⚠️ Props are credit-heavy. If nearing your monthly limit, increase
+> `PROPS_CYCLE_INTERVAL` or `PROPS_HOURS_AHEAD` in `.env`.
 
 ---
 
@@ -225,7 +238,7 @@ ev-dashboard/
 ├── docker-compose.yml
 ├── backend/
 │   ├── Dockerfile
-│   ├── main.py           # FastAPI app — /api/ev, /api/sports, /api/books, /api/status
+│   ├── main.py           # FastAPI app — /api/ev, /api/sports, /api/books, /api/status, /api/bets, /api/credits
 │   └── init.sql          # DB schema + sport seeds
 ├── poller/
 │   ├── Dockerfile
@@ -248,13 +261,8 @@ ev-dashboard/
 
 ## Planned Features
 
-- **Sportsbook deep links** — clicking a bet row opens the book's website to the
-  relevant sport/game page (pre-filling the bet slip requires internal book market
-  IDs not available from The Odds API, but sport/game-level links are feasible)
 - **Historical EV tracking** — trend lines per book/market over time
 - **Alerts** — notify when high EV (≥5%) opportunities appear
-- **Fix betonline_ag key** — API returns `betonlineag` (no underscore); update
-  `SHARP_BOOKS` and `ALL_BOOKS` in poller.py to match
 - **Props for NFL/NCAAF** — add to `PROPS_SPORTS` when season starts
 - **Stale line guard tuning** — `MAX_SHARP_CONSENSUS_DIFF` may need tightening
   for spread markets specifically
@@ -263,7 +271,9 @@ ev-dashboard/
 
 ## Notes
 
-- The bookmaker key for theScore Bet / ESPN Bet is `espnbet` (legacy key retained by The Odds API after ESPN Bet shutdown)
+- The bookmaker key for theScore Bet is `espnbet` (legacy key retained by The Odds API after ESPN Bet's rebrand)
+- Credits reset on the **1st of each month at 00:00 UTC**, not on your billing anniversary — the dynamic poller uses this date, not your invoice date
 - Container networking: always use `docker compose restart` rather than stop/rm/up for individual containers to avoid bridge network issues
-- Redis only caches the last poll summary (TTL 1 hour); all persistent data lives in PostgreSQL
+- Redis caches the poll summary (TTL 1 hour) and latest credit stats; all persistent data lives in PostgreSQL
 - Props consensus uses `sharp_book = "consensus"` in ev_results to distinguish from mainline sharp sourcing
+- EV results older than 30 days are pruned automatically each poll cycle

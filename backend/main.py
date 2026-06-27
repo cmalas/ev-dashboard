@@ -68,14 +68,12 @@ MARKET_LABELS = {
     "batter_runs_scored":      "Runs Scored",
     "batter_total_bases":      "Total Bases",
     "pitcher_strikeouts":      "Strikeouts",
-    "pitcher_innings_pitched": "Innings Pitched",
     "pitcher_hits_allowed":    "Hits Allowed",
 }
 
 PROP_MARKET_KEYS = {
     "batter_hits", "batter_home_runs", "batter_runs_scored",
-    "batter_total_bases", "pitcher_strikeouts",
-    "pitcher_innings_pitched", "pitcher_hits_allowed",
+    "batter_total_bases", "pitcher_strikeouts", "pitcher_hits_allowed",
 }
 
 BOOK_LABELS = {

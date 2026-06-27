@@ -18,11 +18,11 @@ const BOOK_SPORT_URLS = {
     icehockey_nhl:          'https://sportsbook.fanduel.com/navigation/nhl',
   },
   betmgm: {
-    americanfootball_nfl:   'https://sports.betmgm.com/en/sports/football-11',
-    americanfootball_ncaaf: 'https://sports.betmgm.com/en/sports/football-11',
-    basketball_nba:         'https://sports.betmgm.com/en/sports/basketball-7',
-    baseball_mlb:           'https://sports.betmgm.com/en/sports/baseball-23',
-    icehockey_nhl:          'https://sports.betmgm.com/en/sports/ice-hockey-24',
+    americanfootball_nfl:   'https://mo.betmgm.com/en/sports/football-11',
+    americanfootball_ncaaf: 'https://mo.betmgm.com/en/sports/football-11',
+    basketball_nba:         'https://mo.betmgm.com/en/sports/basketball-7',
+    baseball_mlb:           'https://mo.betmgm.com/en/sports/baseball-23',
+    icehockey_nhl:          'https://mo.betmgm.com/en/sports/ice-hockey-24',
   },
   caesars: {
     // Missouri-specific state path

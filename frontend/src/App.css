@@ -396,10 +396,10 @@ html, body, #root {
   align-items: center;
   gap: 3px;
 }
-.book-link:hover { color: var(--accent); }
+.book-link:hover { color: var(--accent); text-decoration: underline; }
 .book-link-icon {
-  font-size: 10px;
-  opacity: 0.45;
+  font-size: 11px;
+  opacity: 0.75;
   transition: opacity 0.15s;
 }
 .book-link:hover .book-link-icon { opacity: 1; }

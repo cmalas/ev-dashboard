@@ -685,7 +685,7 @@ def compute_ev_for_props(cur, game_id: int, event_data: dict, sport_key: str):
 
 # --- Main Poll Loop ----------------------------------------------------------
 
-def poll_once(rds, cycle_number: int):
+def poll_once(rds, cycle_number: int, next_interval: int = None):
     """Run one full poll cycle — mainlines + props (every PROPS_CYCLE_INTERVAL cycles)."""
     log.info("-- Starting poll cycle --")
     db  = get_db()
@@ -813,7 +813,7 @@ def poll_once(rds, cycle_number: int):
         "events_processed":  total_events,
         "props_processed":   props_processed,
         "est_credits_cycle": credits_mainlines,
-        "next_interval":     calc_dynamic_interval(rds),
+        "next_interval":     next_interval if next_interval is not None else calc_dynamic_interval(rds),
     }
     rds.set("poll:last_summary", json.dumps(summary), ex=3600)
 
@@ -863,7 +863,7 @@ def main():
             cycle_number = 0  # 0 % PROPS_CYCLE_INTERVAL == 0, so props will run
 
         try:
-            poll_once(rds, cycle_number)
+            poll_once(rds, cycle_number, next_interval=interval)
             cycle_number += 1
         except Exception as e:
             log.error(f"Poll cycle failed: {e}", exc_info=True)

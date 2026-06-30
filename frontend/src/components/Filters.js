@@ -29,14 +29,14 @@ const MAX_ODDS_OPTIONS = [
   { value: 9999, label: 'Any' },
 ];
 
-export default function Filters({ sports, books, filters, onChange }) {
+export default function Filters({ sports, books, filters, onChange, open }) {
   const set = (key) => (e) => {
     const val = e.target.type === 'range' ? parseFloat(e.target.value) : e.target.value;
     onChange(prev => ({ ...prev, [key]: val }));
   };
 
   return (
-    <aside className="filters">
+    <aside className={`filters${open ? ' open' : ''}`}>
       <div className="filter-group">
         <label className="filter-label">Sport</label>
         <select className="filter-select" value={filters.sport} onChange={set('sport')}>

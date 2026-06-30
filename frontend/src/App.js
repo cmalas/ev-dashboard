@@ -165,6 +165,8 @@ function App() {
     }
   }, []);
 
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
   const [forceSyncing, setForceSyncing] = useState(false);
   const handleForceSync = useCallback(async () => {
     setForceSyncing(true);
@@ -223,7 +225,15 @@ function App() {
       </header>
 
       <main className="app-main">
-        <Filters sports={sports} books={books} filters={filters} onChange={setFilters} />
+        <button
+          className="filter-toggle-btn"
+          onClick={() => setFiltersOpen(o => !o)}
+          aria-expanded={filtersOpen}
+        >
+          ⚙ Filters
+          <span className={`filter-toggle-chevron ${filtersOpen ? 'open' : ''}`}>▾</span>
+        </button>
+        <Filters sports={sports} books={books} filters={filters} onChange={setFilters} open={filtersOpen} />
 
         <section className="results-section">
           <div className="results-header">

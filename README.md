@@ -259,13 +259,14 @@ ev-dashboard/
 
 ---
 
-## Planned Features
+## Mobile Support
 
-- **Historical EV tracking** — trend lines per book/market over time
-- **Alerts** — notify when high EV (≥5%) opportunities appear
-- **Props for NFL/NCAAF** — add to `PROPS_SPORTS` when season starts
-- **Stale line guard tuning** — `MAX_SHARP_CONSENSUS_DIFF` may need tightening
-  for spread markets specifically
+The dashboard is fully responsive and works on phones and tablets.
+
+- On screens ≤ 768px the fixed sidebar collapses into a toggleable **⚙ Filters** drawer
+- The status bar wraps gracefully and truncates the subtitle on small screens
+- The EV table scrolls horizontally so no data is cut off
+- The viewport meta tag is set so browsers do not scale the layout down
 
 ---
 
